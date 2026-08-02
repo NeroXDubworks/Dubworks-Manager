@@ -1770,6 +1770,7 @@ export default function DubworksManager() {
         !resultado.falasTeste &&
         !resultado.respostasSelecao &&
         !resultado.cortesProjeto &&
+        !resultado.Advertencia &&
         !resultado.entregasProjeto
       ) {
         console.error("Retorno inesperado da função do Drive:", resultado);
@@ -1790,6 +1791,7 @@ export default function DubworksManager() {
           resultado.respostasSelecao || linksAtuais.respostasSelecao || "",
         cortesProjeto:
           resultado.cortesProjeto || linksAtuais.cortesProjeto || "",
+        Advertencia: resultado.Advertencia,
         entregasProjeto:
           resultado.entregasProjeto || linksAtuais.entregasProjeto || "",
         formSelecao: resultado.formSelecao || linksAtuais.formSelecao || "",
