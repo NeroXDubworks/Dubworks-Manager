@@ -1,2 +1,466 @@
-/* Mantenha aqui o mobile-first.css original do projeto.
-   Este arquivo existe para preservar o caminho de importação durante a substituição. */
+/* =========================
+   BASE GLOBAL
+========================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: #050816;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: #050816;
+  font-family: Inter, Arial, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+  background: #050816;
+}
+
+img,
+video,
+iframe,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  min-width: 0;
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+/* =========================
+   CONTEÚDO PRINCIPAL
+========================= */
+
+.dw-main-content {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+.dw-main-content > * {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Impede grids, cards e filhos flex de estourarem a tela. */
+.dw-main-content div,
+.dw-main-content section,
+.dw-main-content article,
+.dw-main-content aside,
+.dw-main-content form,
+.dw-main-content nav {
+  min-width: 0;
+}
+
+/* =========================
+   TABELAS
+========================= */
+
+.dw-main-content table {
+  width: 100%;
+}
+
+.dw-main-content table th,
+.dw-main-content table td {
+  overflow-wrap: anywhere;
+}
+
+/* =========================
+   LISTA MOBILE DE PROJETOS
+========================= */
+
+.dw-mobile-project-list {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.dw-mobile-project-card {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  color: #f8fafc;
+  background: rgba(2, 6, 23, 0.46);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dw-mobile-project-card.active {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.dw-mobile-project-cover {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  font-size: 26px;
+}
+
+.dw-mobile-project-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dw-mobile-project-content {
+  min-width: 0;
+}
+
+.dw-mobile-project-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dw-mobile-project-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-mobile-project-title span {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.dw-mobile-project-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.dw-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.dw-chip-blue {
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.15);
+}
+
+.dw-chip-red {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.dw-mobile-project-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 10px;
+  margin-top: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+/* =========================
+   TOPO E MENU MOBILE
+========================= */
+
+.dw-mobile-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  width: 100%;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(2, 6, 23, 0.94);
+  backdrop-filter: blur(14px);
+}
+
+.dw-mobile-menu-button,
+.dw-mobile-notify-button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.85);
+  cursor: pointer;
+}
+
+.dw-mobile-brand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.dw-mobile-brand img {
+  max-width: 108px;
+  max-height: 36px;
+  object-fit: contain;
+}
+
+.dw-mobile-brand span {
+  color: #38bdf8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+
+.dw-mobile-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.dw-mobile-drawer {
+  width: min(86vw, 340px);
+  height: 100%;
+  padding: 18px;
+  overflow-y: auto;
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, #020617, #0f172a);
+  box-shadow: 24px 0 60px rgba(0, 0, 0, 0.42);
+}
+
+.dw-mobile-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dw-mobile-drawer-head img {
+  width: 150px;
+}
+
+.dw-mobile-drawer-head button {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.8);
+  font-size: 24px;
+}
+
+.dw-mobile-user-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0;
+  padding: 13px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.dw-mobile-user-card div:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.dw-mobile-user-card strong,
+.dw-mobile-user-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-mobile-user-card span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.dw-mobile-drawer-nav {
+  display: grid;
+  gap: 8px;
+}
+
+.dw-mobile-drawer-nav button {
+  width: 100%;
+  padding: 13px 14px;
+  border: 0;
+  border-radius: 12px;
+  color: #cbd5e1;
+  background: transparent;
+  text-align: left;
+  font-weight: 800;
+}
+
+.dw-mobile-drawer-nav button.active {
+  color: #38bdf8;
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.dw-mobile-drawer-nav button.danger {
+  color: #fca5a5;
+}
+
+/* =========================
+   DESKTOP GRANDE
+========================= */
+
+@media (min-width: 1600px) {
+  .dw-main-content {
+    padding: 30px 34px !important;
+  }
+}
+
+/* =========================
+   NOTEBOOK / TABLET
+========================= */
+
+@media (max-width: 1100px) {
+  .dw-main-content {
+    padding: 20px !important;
+  }
+}
+
+/* =========================
+   CELULAR
+========================= */
+
+@media (max-width: 768px) {
+  html {
+    font-size: 15px;
+  }
+
+  .dw-main-content {
+    min-height: calc(100vh - 62px);
+    padding: 12px !important;
+  }
+
+  .dw-main-content h1 {
+    font-size: clamp(1.55rem, 8vw, 2rem) !important;
+    line-height: 1.12;
+  }
+
+  .dw-main-content h2 {
+    font-size: 1.15rem !important;
+  }
+
+  .dw-main-content h3 {
+    font-size: 1rem !important;
+  }
+
+  .dw-main-content button,
+  .dw-main-content input,
+  .dw-main-content select,
+  .dw-main-content textarea {
+    max-width: 100%;
+  }
+
+  .dw-main-content table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dw-mobile-project-card {
+    grid-template-columns: 60px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .dw-mobile-project-cover {
+    width: 60px;
+    height: 60px;
+  }
+
+  .dw-mobile-project-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================
+   CELULAR PEQUENO
+========================= */
+
+@media (max-width: 420px) {
+  .dw-main-content {
+    padding: 9px !important;
+  }
+
+  .dw-mobile-topbar {
+    padding-inline: 8px;
+  }
+
+  .dw-mobile-brand span {
+    display: none;
+  }
+
+  .dw-mobile-brand img {
+    max-width: 96px;
+  }
+
+  .dw-mobile-project-card {
+    grid-template-columns: 1fr;
+  }
+
+  .dw-mobile-project-cover {
+    width: 100%;
+    height: 150px;
+  }
+}

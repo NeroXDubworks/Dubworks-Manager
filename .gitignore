@@ -1,0 +1,23 @@
+# Variáveis e segredos
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor
+.vscode/
+
+# Sistema
+.DS_Store
+Thumbs.db
