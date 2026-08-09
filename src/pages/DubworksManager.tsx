@@ -427,7 +427,11 @@ export default function DubworksManager() {
     setCarregandoIA(true);
 
     try {
-      const resposta = await fetch("/api/ia/chat", {
+      const iaApiUrl = import.meta.env.VITE_CORTES_API_URL
+        ? `${import.meta.env.VITE_CORTES_API_URL}/ia/chat`
+        : "/api/ia/chat";
+
+      const resposta = await fetch(iaApiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
