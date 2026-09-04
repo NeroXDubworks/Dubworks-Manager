@@ -29,12 +29,31 @@ export interface AdvertenciaPlanilha {
   id: string;
   linha: number;
   timestamp: string;
+  origem: "planilha" | "sistema";
+  moderador_nome?: string;
   moderador_telefone: string;
   advertido_telefone: string;
   descricao: string;
   valor: string;
   provas: string[];
   data_ocorrencia: string;
+  status: "pendente" | "aprovado" | "rejeitado";
+  criado_por_uid: string | null;
+  criado_por_login: string;
+  decidido_por: string;
+  decidido_em: string | null;
+  motivo_decisao: string;
+}
+
+export interface AdvertenciaInternaInput {
+  advertido_telefone: string;
+  descricao: string;
+  valor?: number;
+  provas?: string[];
+  data_ocorrencia: string;
+  moderador_nome?: string;
+  moderador_telefone?: string;
+  criado_por_login?: string;
 }
 
 export const ADVERTENCIAS_FORM_URL =
@@ -178,6 +197,8 @@ export async function carregarAdvertenciasPlanilha(): Promise<
     id: String(item.id || item.linha || index + 2),
     linha: Number(item.linha || index + 2),
     timestamp: String(item.timestamp || ""),
+    origem: "planilha" as const,
+    moderador_nome: String(item.moderador_nome || ""),
     moderador_telefone: String(item.moderador_telefone || ""),
     advertido_telefone: String(item.advertido_telefone || ""),
     descricao: String(item.descricao || ""),
@@ -189,7 +210,118 @@ export async function carregarAdvertenciasPlanilha(): Promise<
           .map((url) => url.trim())
           .filter(Boolean),
     data_ocorrencia: String(item.data_ocorrencia || ""),
+    status: "aprovado" as const,
+    criado_por_uid: null,
+    criado_por_login: "Formulário antigo",
+    decidido_por: "",
+    decidido_em: null,
+    motivo_decisao: "",
   }));
+}
+
+function mapAdvertenciaInternaDb(item: any): AdvertenciaPlanilha {
+  return {
+    id: `sistema-${String(item.id)}`,
+    linha: Number(item.id),
+    timestamp: String(item.criado_em || ""),
+    origem: "sistema",
+    moderador_nome: String(item.moderador_nome || ""),
+    moderador_telefone: String(item.moderador_telefone || ""),
+    advertido_telefone: String(item.advertido_telefone || ""),
+    descricao: String(item.descricao || ""),
+    valor: String(item.valor ?? "0"),
+    provas: Array.isArray(item.provas)
+      ? item.provas.map((url: any) => String(url || "").trim()).filter(Boolean)
+      : [],
+    data_ocorrencia: String(item.data_ocorrencia || ""),
+    status: ["pendente", "aprovado", "rejeitado"].includes(item.status)
+      ? item.status
+      : "pendente",
+    criado_por_uid: item.criado_por_uid || null,
+    criado_por_login: String(item.criado_por_login || ""),
+    decidido_por: String(item.decidido_por || ""),
+    decidido_em: item.decidido_em || null,
+    motivo_decisao: String(item.motivo_decisao || ""),
+  };
+}
+
+export async function carregarAdvertenciasInternasBanco(): Promise<
+  AdvertenciaPlanilha[]
+> {
+  const { data, error } = await supabase
+    .from("advertencias_internas")
+    .select("*")
+    .order("criado_em", { ascending: false });
+
+  if (error) {
+    console.error("Erro ao carregar advertências internas:", error);
+    throw new Error(
+      error.message || "Não foi possível carregar as advertências internas."
+    );
+  }
+
+  return (data || []).map(mapAdvertenciaInternaDb);
+}
+
+export async function criarAdvertenciaInternaBanco(
+  advertencia: AdvertenciaInternaInput
+): Promise<AdvertenciaPlanilha> {
+  const payload = {
+    advertido_telefone: advertencia.advertido_telefone.trim(),
+    descricao: advertencia.descricao.trim(),
+    valor: Math.max(0, Math.trunc(Number(advertencia.valor) || 0)),
+    provas: (advertencia.provas || [])
+      .map((url) => String(url || "").trim())
+      .filter(Boolean),
+    data_ocorrencia: advertencia.data_ocorrencia,
+    moderador_nome: advertencia.moderador_nome?.trim() || null,
+    moderador_telefone: advertencia.moderador_telefone?.trim() || null,
+    criado_por_login: advertencia.criado_por_login?.trim() || null,
+    status: "pendente",
+    enviado_em: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from("advertencias_internas")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("Erro ao criar advertência interna:", error);
+    throw new Error(error.message || "Não foi possível criar a advertência.");
+  }
+
+  return mapAdvertenciaInternaDb(data);
+}
+
+export async function decidirAdvertenciaInternaBanco(
+  id: number,
+  decisao: "aprovado" | "rejeitado",
+  decididoPor: string,
+  motivo = ""
+): Promise<AdvertenciaPlanilha> {
+  const { data, error } = await supabase
+    .from("advertencias_internas")
+    .update({
+      status: decisao,
+      decidido_por: decididoPor.trim() || null,
+      decidido_em: new Date().toISOString(),
+      motivo_decisao: motivo.trim() || null,
+    })
+    .eq("id", id)
+    .eq("status", "pendente")
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("Erro ao decidir advertência:", error);
+    throw new Error(
+      error.message || "Não foi possível concluir a aprovação da advertência."
+    );
+  }
+
+  return mapAdvertenciaInternaDb(data);
 }
 
 // =========================================================
@@ -291,6 +423,10 @@ export function cargoLabel(cargo: Cargo) {
     diretoria: "Diretoria",
     adm: "ADM",
     adm_treinamento: "ADM Treinamento",
+    moderador: "Moderador",
+    analista_rr: "Analista de RR",
+    marketing: "Marketing",
+    eventos: "Eventos",
     lider: "Líder",
     lider_treinamento: "Líder em treinamento",
     editor: "Editor",
@@ -341,6 +477,7 @@ export function permissaoPadraoPorCargo(cargo: Cargo, chave: ChavePermissao) {
       "acesso_projetos",
       "acesso_membros",
       "acesso_usuarios",
+      "acesso_advertencias",
       "acesso_relatorios_projetos",
       "acesso_relatorios_elenco",
       "acesso_exportacoes",
@@ -349,6 +486,26 @@ export function permissaoPadraoPorCargo(cargo: Cargo, chave: ChavePermissao) {
 
   if (cargo === "adm_treinamento") {
     return ["acesso_usuarios", "acesso_treinamentos"].includes(chave);
+  }
+
+  if (cargo === "moderador") {
+    return ["acesso_membros", "acesso_advertencias"].includes(chave);
+  }
+
+  if (cargo === "analista_rr") {
+    return [
+      "acesso_membros",
+      "acesso_relatorios_membros",
+      "acesso_relatorios_entrada_saida",
+    ].includes(chave);
+  }
+
+  if (cargo === "marketing") {
+    return ["acesso_projetos_finalizados"].includes(chave);
+  }
+
+  if (cargo === "eventos") {
+    return ["acesso_projetos", "acesso_eventos"].includes(chave);
   }
 
   if (cargo === "lider" || cargo === "lider_treinamento") {
@@ -393,16 +550,29 @@ export function podeVerProjeto(usuario: Usuario | null, projeto: Projeto) {
   const lider = normalizar(projeto.Lider);
   const editor = normalizar(projeto.Editor);
 
+  if (cargo === "marketing") {
+    return (
+      temAcesso(usuario, "acesso_projetos_finalizados") &&
+      normalizar(projeto.Status) === "finalizado"
+    );
+  }
+
+  if (!temAcesso(usuario, "acesso_projetos")) return false;
+
   if (["diretoria", "adm", "adm_treinamento"].indexOf(cargo) !== -1) {
     return true;
   }
 
+  if (cargo === "eventos") return true;
+
   if (cargo === "lider" || cargo === "lider_treinamento") {
-    return lider === vinculo || lider === login || lider === nome;
+    if (!lider) return false;
+    return [vinculo, login, nome].filter(Boolean).includes(lider);
   }
 
   if (cargo === "editor") {
-    return editor === vinculo || editor === login || editor === nome;
+    if (!editor) return false;
+    return [vinculo, login, nome].filter(Boolean).includes(editor);
   }
 
   return false;
@@ -420,7 +590,8 @@ export function podeEditarProjeto(usuario: Usuario | null, projeto: Projeto | nu
   if (cargo === "diretoria" || cargo === "adm") return true;
 
   if (cargo === "lider" || cargo === "lider_treinamento") {
-    return lider === vinculo || lider === login || lider === nome;
+    if (!lider) return false;
+    return [vinculo, login, nome].filter(Boolean).includes(lider);
   }
 
   return false;
@@ -449,7 +620,8 @@ export function podeSubirVideoEditor(
 
   if (["diretoria", "adm"].indexOf(cargo) !== -1) return true;
   if (cargo === "editor") {
-    return editor === vinculo || editor === login || editor === nome;
+    if (!editor) return false;
+    return [vinculo, login, nome].filter(Boolean).includes(editor);
   }
   return false;
 }
@@ -490,6 +662,10 @@ export function cargosPermitidosParaCriar(usuario: Usuario | null): Cargo[] {
       "diretoria",
       "adm",
       "adm_treinamento",
+      "moderador",
+      "analista_rr",
+      "marketing",
+      "eventos",
       "lider",
       "lider_treinamento",
       "editor",
@@ -497,7 +673,16 @@ export function cargosPermitidosParaCriar(usuario: Usuario | null): Cargo[] {
     ];
   }
   if (usuario.cargo === "adm") {
-    return ["lider", "lider_treinamento", "editor", "membro"];
+    return [
+      "moderador",
+      "analista_rr",
+      "marketing",
+      "eventos",
+      "lider",
+      "lider_treinamento",
+      "editor",
+      "membro",
+    ];
   }
   if (usuario.cargo === "adm_treinamento") {
     return ["lider_treinamento"];
@@ -557,6 +742,13 @@ export function mapUsuarioDb(item: any): Usuario {
     acesso_projetos: item.acesso_projetos ?? null,
     acesso_membros: item.acesso_membros ?? null,
     acesso_usuarios: item.acesso_usuarios ?? null,
+    acesso_advertencias: item.acesso_advertencias ?? null,
+    acesso_aprovacao_advertencias:
+      item.acesso_aprovacao_advertencias ?? null,
+    acesso_eventos: item.acesso_eventos ?? null,
+    acesso_aprovacao_eventos: item.acesso_aprovacao_eventos ?? null,
+    acesso_projetos_finalizados:
+      item.acesso_projetos_finalizados ?? null,
     acesso_relatorios_projetos: item.acesso_relatorios_projetos ?? null,
     acesso_relatorios_elenco: item.acesso_relatorios_elenco ?? null,
     acesso_relatorios_membros: item.acesso_relatorios_membros ?? null,
@@ -3114,6 +3306,12 @@ export function calcularRelatorioEntradaSaida(membros: Membro[]): RelatorioMes[]
 // AGENDA / CALENDÁRIO
 // =========================================================
 
+export type StatusAgendaEvento =
+  | "rascunho"
+  | "pendente"
+  | "aprovado"
+  | "rejeitado";
+
 export interface AgendaEvento {
   id: number;
   titulo: string;
@@ -3125,6 +3323,12 @@ export interface AgendaEvento {
   link_reuniao: string;
   projeto_id: number | null;
   criado_por: string;
+  criado_por_uid: string | null;
+  status: StatusAgendaEvento;
+  enviado_em: string | null;
+  decidido_por: string;
+  decidido_em: string | null;
+  motivo_decisao: string;
   criado_em: string;
   atualizado_em: string;
 }
@@ -3139,6 +3343,7 @@ export interface AgendaEventoInput {
   link_reuniao?: string;
   projeto_id?: string | number | null;
   criado_por?: string;
+  status?: StatusAgendaEvento;
 }
 
 function mapAgendaEventoDb(item: any): AgendaEvento {
@@ -3156,6 +3361,12 @@ function mapAgendaEventoDb(item: any): AgendaEvento {
         ? null
         : Number(item.projeto_id),
     criado_por: item.criado_por || "",
+    criado_por_uid: item.criado_por_uid || null,
+    status: (item.status || "aprovado") as StatusAgendaEvento,
+    enviado_em: item.enviado_em || null,
+    decidido_por: item.decidido_por || "",
+    decidido_em: item.decidido_em || null,
+    motivo_decisao: item.motivo_decisao || "",
     criado_em: item.criado_em || "",
     atualizado_em: item.atualizado_em || "",
   };
@@ -3193,6 +3404,11 @@ export async function criarAgendaEventoBanco(
         ? null
         : Number(evento.projeto_id),
     criado_por: evento.criado_por?.trim() || null,
+    status: evento.status || "pendente",
+    enviado_em:
+      (evento.status || "pendente") === "pendente"
+        ? new Date().toISOString()
+        : null,
   };
 
   const { data, error } = await supabase
@@ -3227,6 +3443,7 @@ export async function atualizarAgendaEventoBanco(
       String(evento.projeto_id).trim() === ""
         ? null
         : Number(evento.projeto_id),
+    ...(evento.status ? { status: evento.status } : {}),
   };
 
   const { data, error } = await supabase
@@ -3256,6 +3473,32 @@ export async function excluirAgendaEventoBanco(id: number): Promise<boolean> {
   }
 
   return true;
+}
+
+export async function decidirAgendaEventoBanco(
+  id: number,
+  decisao: "aprovado" | "rejeitado",
+  decididoPor: string,
+  motivo = ""
+): Promise<AgendaEvento | null> {
+  const { data, error } = await supabase
+    .from("agenda_eventos")
+    .update({
+      status: decisao,
+      decidido_por: decididoPor.trim(),
+      decidido_em: new Date().toISOString(),
+      motivo_decisao: motivo.trim() || null,
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("Erro ao decidir evento:", error);
+    throw new Error(error.message || "Não foi possível decidir o evento.");
+  }
+
+  return data ? mapAgendaEventoDb(data) : null;
 }
 
 // =========================================================

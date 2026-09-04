@@ -2,6 +2,10 @@ export type Cargo =
   | "diretoria"
   | "adm"
   | "adm_treinamento"
+  | "moderador"
+  | "analista_rr"
+  | "marketing"
+  | "eventos"
   | "lider"
   | "lider_treinamento"
   | "editor"
@@ -29,6 +33,11 @@ export type Usuario = {
   acesso_projetos?: boolean | null;
   acesso_membros?: boolean | null;
   acesso_usuarios?: boolean | null;
+  acesso_advertencias?: boolean | null;
+  acesso_aprovacao_advertencias?: boolean | null;
+  acesso_eventos?: boolean | null;
+  acesso_aprovacao_eventos?: boolean | null;
+  acesso_projetos_finalizados?: boolean | null;
   acesso_relatorios_projetos?: boolean | null;
   acesso_relatorios_elenco?: boolean | null;
   acesso_relatorios_membros?: boolean | null;
@@ -41,13 +50,17 @@ export type ChavePermissao =
   | "acesso_projetos"
   | "acesso_membros"
   | "acesso_usuarios"
+  | "acesso_advertencias"
+  | "acesso_aprovacao_advertencias"
+  | "acesso_eventos"
+  | "acesso_aprovacao_eventos"
+  | "acesso_projetos_finalizados"
   | "acesso_relatorios_projetos"
   | "acesso_relatorios_elenco"
   | "acesso_relatorios_membros"
   | "acesso_relatorios_entrada_saida"
   | "acesso_exportacoes"
   | "acesso_treinamentos";
-
 
 export type ElencoItem = {
   id: string;
@@ -74,7 +87,6 @@ export type DriveStructureResult = {
   formEntregas?: string;
   planilhaSelecao?: string;
   planilhaEntregas?: string;
-
   pastaId?: string;
   selecaoId?: string;
   projetoId?: string;
@@ -232,4 +244,3 @@ export type ModuloTreinamento = {
   checklist: string[];
   pergunta?: PerguntaTreinamento;
 };
-

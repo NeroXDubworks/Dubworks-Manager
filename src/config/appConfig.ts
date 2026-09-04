@@ -6,8 +6,15 @@ export const FORMS_COPIER_URL =
 
 export const permissoesDisponiveis: { chave: ChavePermissao; label: string }[] = [
   { chave: "acesso_projetos", label: "Projetos" },
-  { chave: "acesso_membros", label: "Membros" },
+  { chave: "acesso_membros", label: "Membros / Central de RR" },
   { chave: "acesso_usuarios", label: "Usuários" },
+  { chave: "acesso_advertencias", label: "Central de Advertências" },
+  { chave: "acesso_eventos", label: "Central de Eventos" },
+  { chave: "acesso_aprovacao_eventos", label: "Aprovar eventos" },
+  {
+    chave: "acesso_projetos_finalizados",
+    label: "Marketing / projetos finalizados",
+  },
   { chave: "acesso_relatorios_projetos", label: "Relatório de projetos" },
   { chave: "acesso_relatorios_elenco", label: "Relatório de elenco" },
   { chave: "acesso_relatorios_membros", label: "Relatório de membros" },

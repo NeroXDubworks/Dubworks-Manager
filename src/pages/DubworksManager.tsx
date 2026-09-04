@@ -120,12 +120,16 @@ import {
   carregarPreferenciasChat,
   definirChatSilenciado,
   carregarAdvertenciasPlanilha,
+  carregarAdvertenciasInternasBanco,
+  criarAdvertenciaInternaBanco,
+  decidirAdvertenciaInternaBanco,
   telefonesAdvertenciaEquivalentes,
   ADVERTENCIAS_FORM_URL,
   carregarAgendaEventosBanco,
   criarAgendaEventoBanco,
   atualizarAgendaEventoBanco,
   excluirAgendaEventoBanco,
+  decidirAgendaEventoBanco,
   type AdvertenciaPlanilha,
   type AgendaEvento,
   type ChatCanal,
@@ -164,12 +168,27 @@ export default function DubworksManager() {
   const [mostrarFormNovoUsuario, setMostrarFormNovoUsuario] = useState(false);
   const [mostrarMembros, setMostrarMembros] = useState(false);
   const [mostrarAdvertencias, setMostrarAdvertencias] = useState(false);
+  const [mostrarEventos, setMostrarEventos] = useState(false);
+  const [mostrarMarketing, setMostrarMarketing] = useState(false);
   const [advertencias, setAdvertencias] = useState<AdvertenciaPlanilha[]>([]);
   const [carregandoAdvertencias, setCarregandoAdvertencias] = useState(false);
   const [erroAdvertencias, setErroAdvertencias] = useState("");
   const [queryAdvertencias, setQueryAdvertencias] = useState("");
   const [advertenciaSelecionada, setAdvertenciaSelecionada] =
     useState<AdvertenciaPlanilha | null>(null);
+  const [mostrarNovaAdvertencia, setMostrarNovaAdvertencia] = useState(false);
+  const [salvandoAdvertencia, setSalvandoAdvertencia] = useState(false);
+  const [decidindoAdvertenciaId, setDecidindoAdvertenciaId] = useState<
+    number | null
+  >(null);
+  const [novaAdvertencia, setNovaAdvertencia] = useState(() => ({
+    advertido_telefone: "",
+    moderador_telefone: "",
+    descricao: "",
+    valor: "0",
+    provas: "",
+    data_ocorrencia: new Date().toISOString().slice(0, 10),
+  }));
   const [mostrarFerramentas, setMostrarFerramentas] = useState(false);
   const [categoriaFerramentas, setCategoriaFerramentas] = useState<
     "inicio" | "calendario" | "chat" | "ia" | "editor"
@@ -282,6 +301,15 @@ export default function DubworksManager() {
     useState(false);
   const [toastNotificacaoChat, setToastNotificacaoChat] =
     useState<NotificacaoChat | null>(null);
+  const [permissaoNotificacaoSistema, setPermissaoNotificacaoSistema] = useState<
+    "default" | "granted" | "denied" | "indisponivel"
+  >(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return "indisponivel";
+    }
+
+    return Notification.permission;
+  });
   const [mensagemChatDestacadaId, setMensagemChatDestacadaId] =
     useState<number | null>(null);
   const [mencoesPendentesChat, setMencoesPendentesChat] = useState<
@@ -941,6 +969,11 @@ export default function DubworksManager() {
   }
 
   function abrirNovoCompromissoAgenda(dataBase?: Date) {
+    if (!podeCriarEventos) {
+      alert("Seu cargo não possui permissão para criar eventos.");
+      return;
+    }
+
     const inicioBase = dataBase ? new Date(dataBase) : new Date();
 
     if (!dataBase) {
@@ -1024,6 +1057,7 @@ export default function DubworksManager() {
         projeto_id: agendaForm.projeto_id || null,
         criado_por:
           usuarioLogado?.nome || usuarioLogado?.login || "Sistema",
+        status: podeAprovarEventos ? ("aprovado" as const) : ("pendente" as const),
       };
 
       if (modoModalAgenda === "editar" && eventoAgendaSelecionado) {
@@ -1038,6 +1072,11 @@ export default function DubworksManager() {
       await carregarAgendaAtual();
       setModoModalAgenda(null);
       setEventoAgendaSelecionado(null);
+      alert(
+        podeAprovarEventos
+          ? "Evento salvo e publicado na agenda."
+          : "Evento enviado para aprovação da Diretoria."
+      );
     } catch (erro: any) {
       alert(
         `Não consegui salvar o compromisso: ${
@@ -1071,6 +1110,51 @@ export default function DubworksManager() {
     } finally {
       setSalvandoAgenda(false);
     }
+  }
+
+  async function decidirEventoAgenda(
+    evento: AgendaEvento,
+    decisao: "aprovado" | "rejeitado"
+  ) {
+    if (!podeAprovarEventos || !usuarioLogado) return;
+
+    const motivo =
+      decisao === "rejeitado"
+        ? window.prompt("Informe o motivo da rejeição:", "")
+        : "";
+
+    if (decisao === "rejeitado" && motivo === null) return;
+
+    try {
+      setSalvandoAgenda(true);
+      await decidirAgendaEventoBanco(
+        evento.id,
+        decisao,
+        usuarioLogado.nome || usuarioLogado.login,
+        motivo || ""
+      );
+      await carregarAgendaAtual();
+    } catch (erro: any) {
+      alert(
+        `Não consegui ${decisao === "aprovado" ? "aprovar" : "rejeitar"} o evento: ${
+          erro?.message || String(erro)
+        }`
+      );
+    } finally {
+      setSalvandoAgenda(false);
+    }
+  }
+
+  function podeAlterarEventoAgenda(evento: AgendaEvento) {
+    if (podeAprovarEventos) return true;
+    if (!usuarioLogado || evento.status === "aprovado") return false;
+
+    return [usuarioLogado.nome, usuarioLogado.login]
+      .filter(Boolean)
+      .some(
+        (referencia) =>
+          normalizar(referencia || "") === normalizar(evento.criado_por)
+      );
   }
 
   async function adicionarRespostaSelecaoAoElenco(
@@ -3425,6 +3509,63 @@ export default function DubworksManager() {
     mensagemChatDestacadaId,
   ]);
 
+  async function ativarNotificacoesSistema() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setPermissaoNotificacaoSistema("indisponivel");
+      alert("Este navegador não oferece notificações do sistema.");
+      return;
+    }
+
+    try {
+      const permissao = await Notification.requestPermission();
+      setPermissaoNotificacaoSistema(permissao);
+
+      if (permissao === "granted") {
+        new Notification("DubWorks Manager", {
+          body: "Notificações do celular ativadas com sucesso.",
+          tag: "dubworks-notificacoes-ativadas",
+        });
+      } else if (permissao === "denied") {
+        alert(
+          "As notificações foram bloqueadas no navegador. Libere a permissão nas configurações do site para ativá-las."
+        );
+      }
+    } catch (erro) {
+      console.error("Erro ao solicitar notificações do sistema:", erro);
+      alert("Não consegui ativar as notificações do celular.");
+    }
+  }
+
+  function exibirNotificacaoSistema(notificacao: NotificacaoChat) {
+    if (
+      typeof window === "undefined" ||
+      !("Notification" in window) ||
+      Notification.permission !== "granted"
+    ) {
+      return;
+    }
+
+    try {
+      const notificacaoSistema = new Notification(
+        notificacao.titulo || "DubWorks Manager",
+        {
+          body:
+            notificacao.texto_preview ||
+            "Você recebeu uma nova notificação no DubWorks Manager.",
+          tag: `dubworks-${notificacao.id}`,
+        }
+      );
+
+      notificacaoSistema.onclick = () => {
+        window.focus();
+        void abrirNotificacaoChat(notificacao);
+        notificacaoSistema.close();
+      };
+    } catch (erro) {
+      console.error("Erro ao exibir notificação do sistema:", erro);
+    }
+  }
+
   useEffect(() => {
     const loginAtual = normalizar(usuarioLogado?.login);
 
@@ -3488,6 +3629,7 @@ export default function DubworksManager() {
 
             if (!maisAtual.lida) {
               setToastNotificacaoChat(maisAtual);
+              exibirNotificacaoSistema(maisAtual);
             }
           }, 320);
         }
@@ -3846,6 +3988,28 @@ export default function DubworksManager() {
     mostrarFerramentas,
     categoriaFerramentas,
   ]);
+
+  useEffect(() => {
+    if (
+      !usuarioLogado ||
+      !(mostrarEventos || usuarioLogado.cargo === "eventos")
+    ) {
+      return;
+    }
+
+    void carregarAgendaAtual();
+  }, [usuarioLogado?.login, usuarioLogado?.cargo, mostrarEventos]);
+
+  useEffect(() => {
+    if (
+      !usuarioLogado ||
+      !(mostrarAdvertencias || usuarioLogado.cargo === "moderador")
+    ) {
+      return;
+    }
+
+    void recarregarAdvertencias();
+  }, [usuarioLogado?.login, usuarioLogado?.cargo, mostrarAdvertencias]);
 
   useEffect(() => {
     if (selecionado) {
@@ -4870,8 +5034,37 @@ export default function DubworksManager() {
     );
   }
 
-  const podeVerAdvertencias =
-    usuarioLogado?.cargo === "diretoria" || usuarioLogado?.cargo === "adm";
+  const podeVerAdvertencias = temAcesso(
+    usuarioLogado,
+    "acesso_advertencias"
+  );
+  const podeAprovarAdvertencias = temAcesso(
+    usuarioLogado,
+    "acesso_aprovacao_advertencias"
+  );
+  const podeVerEventos = temAcesso(usuarioLogado, "acesso_eventos");
+  const podeAprovarEventos = temAcesso(
+    usuarioLogado,
+    "acesso_aprovacao_eventos"
+  );
+  const podeCriarEventos = podeVerEventos || podeAprovarEventos;
+  const podeVerMarketing = temAcesso(
+    usuarioLogado,
+    "acesso_projetos_finalizados"
+  );
+  const podeVerRelatorios = [
+    "acesso_relatorios_projetos",
+    "acesso_relatorios_elenco",
+    "acesso_relatorios_membros",
+    "acesso_relatorios_entrada_saida",
+    "acesso_exportacoes",
+  ].some((chave) => temAcesso(usuarioLogado, chave as ChavePermissao));
+  const podeVerFerramentasGerais = ![
+    "moderador",
+    "analista_rr",
+    "marketing",
+    "eventos",
+  ].includes(usuarioLogado?.cargo || "");
 
   function membroDaAdvertencia(advertencia: AdvertenciaPlanilha) {
     return (
@@ -4891,12 +5084,38 @@ export default function DubworksManager() {
       setCarregandoAdvertencias(true);
       setErroAdvertencias("");
 
-      const [listaAdvertencias] = await Promise.all([
+      if (!membros.length) {
+        await recarregarMembros();
+      }
+
+      const [resultadoPlanilha, resultadoSistema] = await Promise.allSettled([
         carregarAdvertenciasPlanilha(),
-        membros.length ? Promise.resolve(membros) : recarregarMembros(),
+        carregarAdvertenciasInternasBanco(),
       ]);
 
-      setAdvertencias(listaAdvertencias);
+      const listaPlanilha =
+        resultadoPlanilha.status === "fulfilled" ? resultadoPlanilha.value : [];
+      const listaSistema =
+        resultadoSistema.status === "fulfilled" ? resultadoSistema.value : [];
+
+      if (
+        resultadoPlanilha.status === "rejected" &&
+        resultadoSistema.status === "rejected"
+      ) {
+        throw resultadoSistema.reason || resultadoPlanilha.reason;
+      }
+
+      setAdvertencias([...listaSistema, ...listaPlanilha]);
+
+      if (resultadoPlanilha.status === "rejected") {
+        setErroAdvertencias(
+          "As advertências do sistema foram carregadas, mas o histórico antigo da planilha não respondeu."
+        );
+      } else if (resultadoSistema.status === "rejected") {
+        setErroAdvertencias(
+          "O histórico antigo foi carregado. Execute o novo SQL para ativar a criação de advertências dentro do sistema."
+        );
+      }
     } catch (erro) {
       console.error("Erro ao carregar advertências:", erro);
       setErroAdvertencias(
@@ -4909,6 +5128,135 @@ export default function DubworksManager() {
     }
   }
 
+  function limparFormularioAdvertencia() {
+    setNovaAdvertencia({
+      advertido_telefone: "",
+      moderador_telefone: "",
+      descricao: "",
+      valor: "0",
+      provas: "",
+      data_ocorrencia: new Date().toISOString().slice(0, 10),
+    });
+  }
+
+  async function salvarNovaAdvertencia() {
+    const telefoneAdvertido = novaAdvertencia.advertido_telefone.trim();
+    const descricao = novaAdvertencia.descricao.trim();
+    const pontos = Number(novaAdvertencia.valor || 0);
+
+    if (!telefoneAdvertido) {
+      alert("Selecione um membro ou informe o telefone do advertido.");
+      return;
+    }
+
+    if (!descricao) {
+      alert("Descreva o motivo e os detalhes da advertência.");
+      return;
+    }
+
+    if (!novaAdvertencia.data_ocorrencia) {
+      alert("Informe a data da ocorrência.");
+      return;
+    }
+
+    if (!Number.isFinite(pontos) || pontos < 0) {
+      alert("A pontuação deve ser um número igual ou maior que zero.");
+      return;
+    }
+
+    const provas = novaAdvertencia.provas
+      .split(/[\r\n,]+/)
+      .map((url) => url.trim())
+      .filter(Boolean);
+
+    try {
+      setSalvandoAdvertencia(true);
+
+      const criada = await criarAdvertenciaInternaBanco({
+        advertido_telefone: telefoneAdvertido,
+        descricao,
+        valor: pontos,
+        provas,
+        data_ocorrencia: novaAdvertencia.data_ocorrencia,
+        moderador_nome: usuarioLogado?.nome || "",
+        moderador_telefone: novaAdvertencia.moderador_telefone,
+        criado_por_login: usuarioLogado?.login || "",
+      });
+
+      setAdvertencias((lista) => [criada, ...lista]);
+      setMostrarNovaAdvertencia(false);
+      limparFormularioAdvertencia();
+      alert("Advertência enviada para aprovação da Diretoria.");
+    } catch (erro) {
+      console.error("Erro ao salvar advertência:", erro);
+      alert(
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível registrar a advertência."
+      );
+    } finally {
+      setSalvandoAdvertencia(false);
+    }
+  }
+
+  async function decidirAdvertencia(
+    advertencia: AdvertenciaPlanilha,
+    decisao: "aprovado" | "rejeitado"
+  ) {
+    if (
+      !podeAprovarAdvertencias ||
+      advertencia.origem !== "sistema" ||
+      advertencia.status !== "pendente"
+    ) {
+      return;
+    }
+
+    let motivo = "";
+
+    if (decisao === "rejeitado") {
+      const resposta = prompt("Informe o motivo da rejeição:");
+      if (resposta === null) return;
+      motivo = resposta.trim();
+
+      if (!motivo) {
+        alert("Informe o motivo para rejeitar a advertência.");
+        return;
+      }
+    } else if (!confirm("Aprovar esta advertência?")) {
+      return;
+    }
+
+    try {
+      setDecidindoAdvertenciaId(advertencia.linha);
+
+      const atualizada = await decidirAdvertenciaInternaBanco(
+        advertencia.linha,
+        decisao,
+        usuarioLogado?.nome || usuarioLogado?.login || "Diretoria",
+        motivo
+      );
+
+      setAdvertencias((lista) =>
+        lista.map((item) => (item.id === atualizada.id ? atualizada : item))
+      );
+      setAdvertenciaSelecionada(atualizada);
+      alert(
+        decisao === "aprovado"
+          ? "Advertência aprovada e publicada no histórico."
+          : "Advertência rejeitada."
+      );
+    } catch (erro) {
+      console.error("Erro ao decidir advertência:", erro);
+      alert(
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível concluir a decisão."
+      );
+    } finally {
+      setDecidindoAdvertenciaId(null);
+    }
+  }
+
   function abrirTelaAdvertencias() {
     if (!podeVerAdvertencias) {
       alert("Seu cargo não possui acesso às advertências.");
@@ -4916,6 +5264,8 @@ export default function DubworksManager() {
     }
 
     setMostrarAdvertencias(true);
+    setMostrarEventos(false);
+    setMostrarMarketing(false);
     setMostrarMembros(false);
     setMostrarUsuarios(false);
     setMostrarRelatorios(false);
@@ -4929,6 +5279,8 @@ export default function DubworksManager() {
 
   function abrirTelaTreinamentos() {
     setMostrarTreinamentos(true);
+    setMostrarEventos(false);
+    setMostrarMarketing(false);
     setMostrarAdvertencias(false);
     setMostrarFerramentas(false);
     setMostrarMembros(false);
@@ -4941,6 +5293,10 @@ export default function DubworksManager() {
 
   function abrirTelaFerramentas() {
     setMostrarFerramentas(true);
+    setMostrarEventos(false);
+    setMostrarMarketing(false);
+    setMostrarEventos(false);
+    setMostrarMarketing(false);
     setCategoriaFerramentas("inicio");
     setMostrarTreinamentos(false);
     setMostrarMembros(false);
@@ -4948,6 +5304,47 @@ export default function DubworksManager() {
     setMostrarRelatorios(false);
     setMostrarNovoProjeto(false);
     setMostrarFormNovoUsuario(false);
+    setMenuMobileAberto(false);
+  }
+
+  function abrirTelaEventos() {
+    if (!podeCriarEventos) {
+      alert("Seu cargo não possui acesso à Central de Eventos.");
+      return;
+    }
+
+    setMostrarEventos(true);
+    setMostrarMarketing(false);
+    setMostrarAdvertencias(false);
+    setMostrarMembros(false);
+    setMostrarUsuarios(false);
+    setMostrarRelatorios(false);
+    setMostrarTreinamentos(false);
+    setMostrarFerramentas(false);
+    setMostrarNovoProjeto(false);
+    setSelecionadoId(null);
+    setRascunho(null);
+    setMenuMobileAberto(false);
+    void carregarAgendaAtual();
+  }
+
+  function abrirTelaMarketing() {
+    if (!podeVerMarketing) {
+      alert("Seu cargo não possui acesso à Central de Marketing.");
+      return;
+    }
+
+    setMostrarMarketing(true);
+    setMostrarEventos(false);
+    setMostrarAdvertencias(false);
+    setMostrarMembros(false);
+    setMostrarUsuarios(false);
+    setMostrarRelatorios(false);
+    setMostrarTreinamentos(false);
+    setMostrarFerramentas(false);
+    setMostrarNovoProjeto(false);
+    setSelecionadoId(null);
+    setRascunho(null);
     setMenuMobileAberto(false);
   }
 
@@ -5425,12 +5822,24 @@ export default function DubworksManager() {
     ? "treinamentos"
     : mostrarAdvertencias
     ? "advertencias"
+    : mostrarEventos
+    ? "eventos"
+    : mostrarMarketing
+    ? "marketing"
     : mostrarMembros
     ? "membros"
     : mostrarUsuarios
     ? "usuarios"
     : mostrarRelatorios
     ? "relatorios"
+    : usuarioLogado?.cargo === "marketing"
+    ? "marketing"
+    : usuarioLogado?.cargo === "analista_rr"
+    ? "membros"
+    : usuarioLogado?.cargo === "moderador"
+    ? "advertencias"
+    : usuarioLogado?.cargo === "eventos"
+    ? "eventos"
     : "projetos";
   const projetoDrive = rascunho || projetoPainel;
   const driveSalvo = extrairLinksDrive(projetoDrive?.Observacoes);
@@ -6388,6 +6797,9 @@ export default function DubworksManager() {
         advertencia.advertido_telefone,
         advertencia.descricao,
         advertencia.valor,
+        advertencia.status,
+        advertencia.decidido_por,
+        advertencia.motivo_decisao,
         advertencia.data_ocorrencia,
         advertencia.timestamp,
         membro?.nome || "",
@@ -6397,6 +6809,10 @@ export default function DubworksManager() {
         .toLocaleLowerCase("pt-BR")
         .includes(termo);
     });
+
+    listaFiltrada.sort(
+      (a, b) => Number(b.status === "pendente") - Number(a.status === "pendente")
+    );
 
     const advertidosUnicos = new Set(
       advertencias
@@ -6413,6 +6829,10 @@ export default function DubworksManager() {
 
     const comPontuacao = advertencias.filter(
       (item) => Number(String(item.valor || "").replace(",", ".")) > 0
+    ).length;
+
+    const pendentesAprovacao = advertencias.filter(
+      (item) => item.status === "pendente"
     ).length;
 
     const cardMetrica = (
@@ -6513,7 +6933,7 @@ export default function DubworksManager() {
                   lineHeight: 1.5,
                 }}
               >
-                Gerenciamento interno de advertências.
+                Registre ocorrências e acompanhe a aprovação da Diretoria.
             
               </p>
             </div>
@@ -6527,6 +6947,14 @@ export default function DubworksManager() {
             >
               <button
                 type="button"
+                onClick={() => setMostrarNovaAdvertencia(true)}
+                style={botaoPrimarioStyle}
+              >
+                ＋ Nova advertência
+              </button>
+
+              <button
+                type="button"
                 onClick={() =>
                   window.open(
                     ADVERTENCIAS_FORM_URL,
@@ -6536,14 +6964,14 @@ export default function DubworksManager() {
                 }
                 style={botaoSecundarioStyle}
               >
-                ＋ Abrir formulário
+                ↗ Formulário antigo
               </button>
 
               <button
                 type="button"
                 onClick={() => void recarregarAdvertencias()}
                 disabled={carregandoAdvertencias}
-                style={botaoPrimarioStyle}
+                style={botaoSecundarioStyle}
               >
                 {carregandoAdvertencias ? "Sincronizando..." : "↻ Sincronizar"}
               </button>
@@ -6556,7 +6984,7 @@ export default function DubworksManager() {
             display: "grid",
             gridTemplateColumns: isMobile
               ? "1fr"
-              : "repeat(4, minmax(170px, 220px))",
+              : "repeat(5, minmax(150px, 210px))",
             justifyContent: "center",
             gap: 12,
           }}
@@ -6564,7 +6992,7 @@ export default function DubworksManager() {
           {cardMetrica(
             "Registros",
             advertencias.length,
-            "linhas lidas da planilha",
+            "planilha e registros internos",
             "▤"
           )}
           {cardMetrica(
@@ -6572,6 +7000,12 @@ export default function DubworksManager() {
             advertidosUnicos,
             "telefones diferentes",
             "👥"
+          )}
+          {cardMetrica(
+            "Pendentes",
+            pendentesAprovacao,
+            "aguardando decisão da Diretoria",
+            "⏳"
           )}
           {cardMetrica(
             "Com pontuação",
@@ -6600,7 +7034,7 @@ export default function DubworksManager() {
           >
             <div>
               <h2 style={{ ...tituloCardDarkStyle, marginBottom: 4 }}>
-                Histórico de advertências
+                Fila e histórico de advertências
               </h2>
               <div style={{ color: "#64748b", fontSize: 12 }}>
                 {listaFiltrada.length} registro(s) exibido(s)
@@ -6648,7 +7082,7 @@ export default function DubworksManager() {
                 }}
               >
                 Clique em <strong>Sincronizar</strong> para carregar os
-                registros do formulário.
+                registros existentes.
               </div>
             )}
 
@@ -6660,7 +7094,7 @@ export default function DubworksManager() {
                 color: "#93c5fd",
               }}
             >
-              Lendo a aba ADVERTÊNCIAS...
+              Carregando advertências...
             </div>
           )}
 
@@ -6669,6 +7103,27 @@ export default function DubworksManager() {
               {listaFiltrada.map((advertencia) => {
                 const membro = membroDaAdvertencia(advertencia);
                 const pontos = String(advertencia.valor || "").trim();
+                const statusVisual =
+                  advertencia.status === "aprovado"
+                    ? {
+                        label: "Aprovada",
+                        cor: "#86efac",
+                        fundo: "rgba(22,101,52,.18)",
+                        borda: "rgba(74,222,128,.24)",
+                      }
+                    : advertencia.status === "rejeitado"
+                    ? {
+                        label: "Rejeitada",
+                        cor: "#fca5a5",
+                        fundo: "rgba(127,29,29,.18)",
+                        borda: "rgba(248,113,113,.24)",
+                      }
+                    : {
+                        label: "Aguardando aprovação",
+                        cor: "#fde68a",
+                        fundo: "rgba(120,53,15,.20)",
+                        borda: "rgba(245,158,11,.28)",
+                      };
 
                 return (
                   <button
@@ -6680,7 +7135,10 @@ export default function DubworksManager() {
                     style={{
                       width: "100%",
                       borderRadius: 13,
-                      border: "1px solid rgba(148,163,184,.12)",
+                      border:
+                        advertencia.status === "pendente"
+                          ? "1px solid rgba(245,158,11,.30)"
+                          : "1px solid rgba(148,163,184,.12)",
                       background: "rgba(2,6,23,.34)",
                       padding: isMobile ? 12 : 14,
                       cursor: "pointer",
@@ -6729,7 +7187,21 @@ export default function DubworksManager() {
                       {advertencia.descricao || "Sem descrição"}
                     </div>
 
-                    <div>
+                    <div style={{ display: "grid", gap: 6, justifyItems: "start" }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          borderRadius: 999,
+                          padding: "5px 9px",
+                          background: statusVisual.fundo,
+                          border: `1px solid ${statusVisual.borda}`,
+                          color: statusVisual.cor,
+                          fontSize: 10,
+                          fontWeight: 900,
+                        }}
+                      >
+                        {statusVisual.label}
+                      </span>
                       <span
                         style={{
                           display: "inline-flex",
@@ -6781,12 +7253,319 @@ export default function DubworksManager() {
     );
   };
 
+  const EventsPage = () => {
+    const eventosOrdenados = [...agendaEventos].sort(
+      (a, b) => new Date(a.inicio).getTime() - new Date(b.inicio).getTime()
+    );
+    const pendentes = eventosOrdenados.filter(
+      (evento) => evento.status === "pendente"
+    );
+    const aprovados = eventosOrdenados.filter(
+      (evento) => evento.status === "aprovado"
+    );
+    const rejeitados = eventosOrdenados.filter(
+      (evento) => evento.status === "rejeitado"
+    );
+
+    function estiloStatusEvento(status: AgendaEvento["status"]) {
+      if (status === "aprovado") {
+        return { label: "Aprovado", cor: "#86efac", fundo: "rgba(22,101,52,.20)" };
+      }
+      if (status === "rejeitado") {
+        return { label: "Rejeitado", cor: "#fca5a5", fundo: "rgba(127,29,29,.20)" };
+      }
+      if (status === "rascunho") {
+        return { label: "Rascunho", cor: "#cbd5e1", fundo: "rgba(71,85,105,.22)" };
+      }
+      return { label: "Aguardando aprovação", cor: "#fde68a", fundo: "rgba(120,53,15,.24)" };
+    }
+
+    function eventoDoUsuario(evento: AgendaEvento) {
+      const referencias = [usuarioLogado?.nome, usuarioLogado?.login]
+        .filter(Boolean)
+        .map((valor) => normalizar(valor || ""));
+      return referencias.includes(normalizar(evento.criado_por));
+    }
+
+    return (
+      <div style={{ display: "grid", gap: 18 }}>
+        <div style={pageHeaderDarkStyle}>
+          <div>
+            <div style={breadcrumbDarkStyle}>Comunidade › Eventos</div>
+            <h1 style={pageTitleDarkStyle}>Central de Eventos</h1>
+            <p style={{ color: "#94a3b8", margin: "7px 0 0" }}>
+              Crie eventos e acompanhe a aprovação da Diretoria.
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              style={botaoSecundarioStyle}
+              onClick={() => void carregarAgendaAtual()}
+            >
+              ↻ Atualizar
+            </button>
+            {podeCriarEventos && (
+              <button
+                type="button"
+                style={botaoPrimarioStyle}
+                onClick={() => abrirNovoCompromissoAgenda()}
+              >
+                + Criar evento
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)",
+            gap: 14,
+          }}
+        >
+          <MiniStat icon="📅" value={String(eventosOrdenados.length)} label="Eventos visíveis" color="#38bdf8" />
+          <MiniStat icon="◷" value={String(pendentes.length)} label="Aguardando aprovação" color="#f59e0b" />
+          <MiniStat icon="✓" value={String(aprovados.length)} label="Aprovados" color="#22c55e" />
+          <MiniStat icon="×" value={String(rejeitados.length)} label="Rejeitados" color="#f87171" />
+        </div>
+
+        {podeAprovarEventos && pendentes.length > 0 && (
+          <div
+            style={{
+              ...painelDarkStyle,
+              border: "1px solid rgba(245,158,11,.28)",
+            }}
+          >
+            <div style={{ color: "#fde68a", fontSize: 12, fontWeight: 900 }}>
+              FILA DA DIRETORIA
+            </div>
+            <h2 style={{ ...tituloCardDarkStyle, marginTop: 6 }}>
+              {pendentes.length} evento(s) esperando decisão
+            </h2>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 12 }}>
+          {carregandoAgenda ? (
+            <div style={{ ...painelDarkStyle, color: "#7dd3fc" }}>
+              Carregando eventos...
+            </div>
+          ) : eventosOrdenados.length ? (
+            eventosOrdenados.map((evento) => {
+              const status = estiloStatusEvento(evento.status);
+              const projeto = evento.projeto_id
+                ? projetosVisiveis.find(
+                    (item) => Number(item.ID) === Number(evento.projeto_id)
+                  )
+                : null;
+              const podeAlterar =
+                podeAprovarEventos ||
+                (eventoDoUsuario(evento) && evento.status !== "aprovado");
+
+              return (
+                <article
+                  key={evento.id}
+                  style={{
+                    ...painelDarkStyle,
+                    display: "grid",
+                    gridTemplateColumns: isMobile ? "1fr" : "150px minmax(0,1fr) auto",
+                    gap: 16,
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ color: "#7dd3fc", fontSize: 14 }}>
+                      {new Date(evento.inicio).toLocaleDateString("pt-BR")}
+                    </strong>
+                    <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>
+                      {new Date(evento.inicio).toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <h3 style={{ margin: 0, color: "#f8fafc" }}>{evento.titulo}</h3>
+                      <span
+                        style={{
+                          borderRadius: 999,
+                          padding: "5px 9px",
+                          background: status.fundo,
+                          color: status.cor,
+                          fontSize: 10,
+                          fontWeight: 900,
+                        }}
+                      >
+                        {status.label}
+                      </span>
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 7 }}>
+                      {projeto?.Projeto || "Evento geral"} · Criado por {evento.criado_por || "—"}
+                    </div>
+                    {evento.motivo_decisao && (
+                      <div style={{ color: "#fca5a5", fontSize: 12, marginTop: 7 }}>
+                        Motivo: {evento.motivo_decisao}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      style={botaoSecundarioStyle}
+                      onClick={() => visualizarCompromissoAgenda(evento)}
+                    >
+                      Ver
+                    </button>
+                    {podeAlterar && (
+                      <button
+                        type="button"
+                        style={botaoSecundarioStyle}
+                        onClick={() => editarCompromissoAgenda(evento)}
+                      >
+                        Editar
+                      </button>
+                    )}
+                    {podeAprovarEventos && evento.status === "pendente" && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={salvandoAgenda}
+                          style={{ ...botaoPrimarioStyle, background: "linear-gradient(135deg,#22c55e,#15803d)" }}
+                          onClick={() => void decidirEventoAgenda(evento, "aprovado")}
+                        >
+                          Aprovar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={salvandoAgenda}
+                          style={{ ...botaoSecundarioStyle, color: "#fca5a5" }}
+                          onClick={() => void decidirEventoAgenda(evento, "rejeitado")}
+                        >
+                          Rejeitar
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <div style={{ ...painelDarkStyle, color: "#94a3b8", textAlign: "center", padding: 36 }}>
+              Nenhum evento cadastrado ainda.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const MarketingPage = () => {
+    const finalizados = projetosVisiveis.filter(
+      (projeto) => normalizar(projeto.Status) === "finalizado"
+    );
+
+    return (
+      <div style={{ display: "grid", gap: 18 }}>
+        <div style={pageHeaderDarkStyle}>
+          <div>
+            <div style={breadcrumbDarkStyle}>Conteúdo › Marketing</div>
+            <h1 style={pageTitleDarkStyle}>Central de Marketing</h1>
+            <p style={{ color: "#94a3b8", margin: "7px 0 0" }}>
+              Acesso somente leitura às pastas finais dos projetos concluídos.
+            </p>
+          </div>
+          <span
+            style={{
+              borderRadius: 999,
+              padding: "8px 12px",
+              background: "rgba(34,197,94,.14)",
+              color: "#86efac",
+              fontWeight: 900,
+              fontSize: 12,
+            }}
+          >
+            {finalizados.length} finalizado(s)
+          </span>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit,minmax(280px,1fr))",
+            gap: 16,
+          }}
+        >
+          {finalizados.length ? (
+            finalizados.map((projeto) => {
+              const links = extrairLinksDrive(projeto.Observacoes);
+              const linkFinal = projeto.Drive_Final_Link || links.finalizados || "";
+
+              return (
+                <article key={projeto.ID} style={{ ...painelDarkStyle, display: "grid", gap: 16 }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    {projeto.Capa_URL ? (
+                      <img
+                        src={projeto.Capa_URL}
+                        alt=""
+                        style={{ width: 58, height: 58, objectFit: "cover", borderRadius: 12 }}
+                      />
+                    ) : (
+                      <div style={{ width: 58, height: 58, borderRadius: 12, display: "grid", placeItems: "center", background: "rgba(56,189,248,.12)", fontSize: 24 }}>
+                        📁
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <h2 style={{ ...tituloCardDarkStyle, margin: 0 }}>{projeto.Projeto}</h2>
+                      <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 5 }}>
+                        {[projeto.Tipo, projeto.Genero].filter(Boolean).join(" · ") || "Projeto finalizado"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!linkFinal}
+                    style={{
+                      ...botaoPrimarioStyle,
+                      opacity: linkFinal ? 1 : 0.55,
+                      cursor: linkFinal ? "pointer" : "not-allowed",
+                    }}
+                    onClick={() =>
+                      linkFinal && window.open(linkFinal, "_blank", "noopener,noreferrer")
+                    }
+                  >
+                    {linkFinal ? "Abrir pasta 3 | Finalizado" : "Pasta final não cadastrada"}
+                  </button>
+                </article>
+              );
+            })
+          ) : (
+            <div style={{ ...painelDarkStyle, color: "#94a3b8", textAlign: "center", padding: 36 }}>
+              Nenhum projeto finalizado disponível.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const MembersPage = () => (
     <div style={{ display: "grid", gap: 18 }}>
       <div style={pageHeaderDarkStyle}>
         <div>
-          <div style={breadcrumbDarkStyle}>Membros</div>
-          <h1 style={pageTitleDarkStyle}>Central de Membros</h1>
+          <div style={breadcrumbDarkStyle}>
+            {usuarioLogado?.cargo === "analista_rr" ? "Recepção e Remoção" : "Membros"}
+          </div>
+          <h1 style={pageTitleDarkStyle}>
+            {usuarioLogado?.cargo === "analista_rr"
+              ? "Central de RR"
+              : "Central de Membros"}
+          </h1>
         </div>
         <button
           onClick={async () => {
@@ -7208,84 +7987,105 @@ export default function DubworksManager() {
         </div>
       )}
 
-      <div
-        style={{
-          ...painelDarkStyle,
-          overflowX: "auto",
-        }}
-      >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {[
-                "Usuário",
-                "Cargo",
-                "Projetos",
-                "Membros",
-                "Usuários",
-                "Relatórios",
-              ].map((titulo) => (
-                <th
-                  key={titulo}
+      {isMobile ? (
+        <div style={{ display: "grid", gap: 12 }}>
+          {usuarios.map((usuario) => (
+            <article
+              key={usuario.id || usuario.login}
+              style={{
+                ...painelDarkStyle,
+                padding: 16,
+                display: "grid",
+                gap: 14,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: "#f8fafc",
+                      fontWeight: 900,
+                      fontSize: 16,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {usuario.nome || "Usuário sem nome"}
+                  </div>
+                  <div
+                    style={{
+                      color: "#94a3b8",
+                      fontSize: 12,
+                      marginTop: 3,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {usuario.login}
+                  </div>
+                </div>
+
+                <span
                   style={{
-                    textAlign: "left",
-                    padding: 14,
-                    color: "#94a3b8",
-                    fontSize: 13,
-                    borderBottom: "1px solid rgba(148,163,184,0.14)",
+                    flex: "0 0 auto",
+                    padding: "6px 9px",
+                    borderRadius: 999,
+                    color: "#bfdbfe",
+                    background: "rgba(37,99,235,.16)",
+                    border: "1px solid rgba(96,165,250,.18)",
+                    fontSize: 11,
+                    fontWeight: 900,
                   }}
                 >
-                  {titulo}
-                </th>
-              ))}
-            </tr>
-          </thead>
+                  {cargoLabel(usuario.cargo)}
+                </span>
+              </div>
 
-          <tbody>
-            {usuarios.map((usuario) => (
-              <tr key={usuario.id || usuario.login}>
-                <td
-                  style={{
-                    padding: 14,
-                    borderBottom: "1px solid rgba(148,163,184,0.08)",
-                  }}
-                >
-                  <div style={{ color: "#f8fafc", fontWeight: 700 }}>
-                    {usuario.nome}
-                  </div>
-                  <div style={{ color: "#94a3b8", fontSize: 12 }}>
-                    @{usuario.login}
-                  </div>
-                </td>
-
-                <td style={{ padding: 14, color: "#cbd5e1" }}>
-                  {usuario.cargo}
-                </td>
-
-                {(
-                  [
-                    "acesso_projetos",
-                    "acesso_membros",
-                    "acesso_usuarios",
-                    "acesso_relatorios_projetos",
-                  ] as ChavePermissao[]
-                ).map((chave) => {
+              <div style={{ display: "grid", gap: 8 }}>
+                {([
+                  ["acesso_projetos", "Projetos"],
+                  ["acesso_membros", "Membros"],
+                  ["acesso_usuarios", "Usuários"],
+                  ["acesso_relatorios_projetos", "Relatórios"],
+                ] as [ChavePermissao, string][]).map(([chave, label]) => {
                   const permitido = temAcesso(usuario, chave);
+
                   return (
-                    <td
+                    <label
                       key={chave}
                       style={{
-                        padding: 14,
-                        color: permitido ? "#22c55e" : "#ef4444",
-                        fontWeight: 700,
+                        minWidth: 0,
+                        minHeight: 44,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "9px 11px",
+                        borderRadius: 12,
+                        background: "rgba(2,6,23,.48)",
+                        border: "1px solid rgba(148,163,184,.10)",
+                        cursor: podeGerenciarUsuarios(usuarioLogado)
+                          ? "pointer"
+                          : "default",
                       }}
                     >
-                      <label
+                      <span style={{ color: "#cbd5e1", fontWeight: 800 }}>
+                        {label}
+                      </span>
+
+                      <span
                         style={{
                           display: "flex",
                           alignItems: "center",
                           gap: 8,
-                          cursor: "pointer",
+                          color: permitido ? "#86efac" : "#fca5a5",
+                          fontSize: 12,
+                          fontWeight: 900,
                         }}
                       >
                         <input
@@ -7301,15 +8101,116 @@ export default function DubworksManager() {
                           }
                         />
                         {permitido ? "Permitido" : "Bloqueado"}
-                      </label>
-                    </td>
+                      </span>
+                    </label>
                   );
                 })}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div
+          style={{
+            ...painelDarkStyle,
+            overflowX: "auto",
+          }}
+        >
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                {[
+                  "Usuário",
+                  "Cargo",
+                  "Projetos",
+                  "Membros",
+                  "Usuários",
+                  "Relatórios",
+                ].map((titulo) => (
+                  <th
+                    key={titulo}
+                    style={{
+                      textAlign: "left",
+                      padding: 14,
+                      color: "#94a3b8",
+                      fontSize: 13,
+                      borderBottom: "1px solid rgba(148,163,184,0.14)",
+                    }}
+                  >
+                    {titulo}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+
+            <tbody>
+              {usuarios.map((usuario) => (
+                <tr key={usuario.id || usuario.login}>
+                  <td
+                    style={{
+                      padding: 14,
+                      borderBottom: "1px solid rgba(148,163,184,0.08)",
+                    }}
+                  >
+                    <div style={{ color: "#f8fafc", fontWeight: 700 }}>
+                      {usuario.nome}
+                    </div>
+                    <div style={{ color: "#94a3b8", fontSize: 12 }}>
+                      @{usuario.login}
+                    </div>
+                  </td>
+
+                  <td style={{ padding: 14, color: "#cbd5e1" }}>
+                    {usuario.cargo}
+                  </td>
+
+                  {([
+                    "acesso_projetos",
+                    "acesso_membros",
+                    "acesso_usuarios",
+                    "acesso_relatorios_projetos",
+                  ] as ChavePermissao[]).map((chave) => {
+                    const permitido = temAcesso(usuario, chave);
+                    return (
+                      <td
+                        key={chave}
+                        style={{
+                          padding: 14,
+                          color: permitido ? "#22c55e" : "#ef4444",
+                          fontWeight: 700,
+                        }}
+                      >
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={permitido}
+                            disabled={!podeGerenciarUsuarios(usuarioLogado)}
+                            onChange={(e) =>
+                              atualizarPermissaoUsuario(
+                                usuario,
+                                chave,
+                                e.target.checked
+                              )
+                            }
+                          />
+                          {permitido ? "Permitido" : "Bloqueado"}
+                        </label>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div style={pageHeaderDarkStyle}>
         <div>
@@ -7321,43 +8222,124 @@ export default function DubworksManager() {
         </button>
       </div>
 
-      <div style={painelDarkStyle}>
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}
-          >
-            <thead>
-              <tr>
-                {["Nome", "Login", "Cargo", "Vínculo", "Treinamento"].map(
-                  (h) => (
-                    <th key={h} style={tabelaHeaderDarkStyle}>
-                      {h}
-                    </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {usuariosVisiveis.map((u) => (
-                <tr
-                  key={u.id || u.login}
-                  style={{ borderBottom: "1px solid rgba(148,163,184,0.10)" }}
+      {isMobile ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          {usuariosVisiveis.map((u) => (
+            <article
+              key={u.id || u.login}
+              style={{
+                ...painelDarkStyle,
+                padding: 15,
+                display: "grid",
+                gap: 10,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <strong
+                  style={{
+                    display: "block",
+                    color: "#f8fafc",
+                    fontSize: 15,
+                    overflowWrap: "anywhere",
+                  }}
                 >
-                  <td style={{ ...tabelaCellDarkStyle, fontWeight: 800 }}>
-                    {u.nome}
-                  </td>
-                  <td style={tabelaCellDarkStyle}>{u.login}</td>
-                  <td style={tabelaCellDarkStyle}>{cargoLabel(u.cargo)}</td>
-                  <td style={tabelaCellDarkStyle}>{u.vinculo || "-"}</td>
-                  <td style={tabelaCellDarkStyle}>
+                  {u.nome}
+                </strong>
+                <span
+                  style={{
+                    display: "block",
+                    color: "#94a3b8",
+                    fontSize: 12,
+                    marginTop: 3,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {u.login}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                  gap: 8,
+                }}
+              >
+                <div>
+                  <div style={{ color: "#64748b", fontSize: 10 }}>Cargo</div>
+                  <div style={{ color: "#cbd5e1", fontWeight: 800 }}>
+                    {cargoLabel(u.cargo)}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "#64748b", fontSize: 10 }}>Vínculo</div>
+                  <div
+                    style={{
+                      color: "#cbd5e1",
+                      fontWeight: 800,
+                      overflowWrap: "anywhere",
+                    }}
+                  >
+                    {u.vinculo || "-"}
+                  </div>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div style={{ color: "#64748b", fontSize: 10 }}>
+                    Treinamento
+                  </div>
+                  <div style={{ color: "#cbd5e1", fontWeight: 800 }}>
                     {statusTreinamentoLabel(u.training_status)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
         </div>
-      </div>
+      ) : (
+        <div style={painelDarkStyle}>
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 860,
+              }}
+            >
+              <thead>
+                <tr>
+                  {["Nome", "Login", "Cargo", "Vínculo", "Treinamento"].map(
+                    (h) => (
+                      <th key={h} style={tabelaHeaderDarkStyle}>
+                        {h}
+                      </th>
+                    )
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {usuariosVisiveis.map((u) => (
+                  <tr
+                    key={u.id || u.login}
+                    style={{
+                      borderBottom: "1px solid rgba(148,163,184,0.10)",
+                    }}
+                  >
+                    <td style={{ ...tabelaCellDarkStyle, fontWeight: 800 }}>
+                      {u.nome}
+                    </td>
+                    <td style={tabelaCellDarkStyle}>{u.login}</td>
+                    <td style={tabelaCellDarkStyle}>{cargoLabel(u.cargo)}</td>
+                    <td style={tabelaCellDarkStyle}>{u.vinculo || "-"}</td>
+                    <td style={tabelaCellDarkStyle}>
+                      {statusTreinamentoLabel(u.training_status)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -7566,7 +8548,9 @@ export default function DubworksManager() {
         );
 
       const eventosCombinados = [
-        ...agendaEventos.map((evento) => ({
+        ...agendaEventos
+          .filter((evento) => evento.status === "aprovado")
+          .map((evento) => ({
           id: `agenda-${evento.id}`,
           tipo: "agenda" as const,
           titulo: evento.titulo,
@@ -7579,7 +8563,7 @@ export default function DubworksManager() {
                   Number(projeto.ID) === Number(evento.projeto_id)
               ) || null
             : null,
-        })),
+          })),
         ...projetosDoCalendarioAtual.map(({ projeto, data }) => ({
           id: `projeto-${projeto.ID}`,
           tipo: "projeto" as const,
@@ -7790,13 +8774,15 @@ export default function DubworksManager() {
               >
                 ›
               </button>
-              <button
-                type="button"
-                style={botaoPrimarioStyle}
-                onClick={() => abrirNovoCompromissoAgenda()}
-              >
-                + Novo compromisso
-              </button>
+              {podeCriarEventos && (
+                <button
+                  type="button"
+                  style={botaoPrimarioStyle}
+                  onClick={() => abrirNovoCompromissoAgenda()}
+                >
+                  + Novo compromisso
+                </button>
+              )}
             </div>
           </div>
 
@@ -7849,7 +8835,11 @@ export default function DubworksManager() {
                     fontWeight: 800,
                   }}
                 >
-                  {agendaEventos.length} compromisso(s)
+                  {
+                    agendaEventos.filter(
+                      (evento) => evento.status === "aprovado"
+                    ).length
+                  } compromisso(s)
                 </span>
               </div>
 
@@ -8213,13 +9203,15 @@ export default function DubworksManager() {
                   </h2>
                 </div>
 
-                <button
-                  type="button"
-                  style={botaoPrimarioStyle}
-                  onClick={() => abrirNovoCompromissoAgenda()}
-                >
-                  + Novo compromisso
-                </button>
+                {podeCriarEventos && (
+                  <button
+                    type="button"
+                    style={botaoPrimarioStyle}
+                    onClick={() => abrirNovoCompromissoAgenda()}
+                  >
+                    + Novo compromisso
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -11423,28 +12415,58 @@ export default function DubworksManager() {
 
   const ProjectsPage = () => (
     <div style={{ display: "grid", gap: 18 }}>
-      <div style={pageHeaderDarkStyle}>
-        <div>
+      <div
+        style={{
+          ...pageHeaderDarkStyle,
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: isMobile ? "stretch" : "flex-start",
+          width: "100%",
+          minWidth: 0,
+        }}
+      >
+        <div style={{ minWidth: 0, width: isMobile ? "100%" : "auto" }}>
           <div style={breadcrumbDarkStyle}>Projetos › Detalhes do Projeto</div>
-          <h1 style={pageTitleDarkStyle}>
-            {projetoPainel?.Projeto || "Projetos"}
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              minWidth: 0,
+            }}
+          >
+            <h1
+              style={{
+                ...pageTitleDarkStyle,
+                fontSize: isMobile ? 32 : pageTitleDarkStyle.fontSize,
+                overflowWrap: "anywhere",
+                wordBreak: "normal",
+                minWidth: 0,
+              }}
+            >
+              {projetoPainel?.Projeto || "Projetos"}
+            </h1>
+
             {projetoPainel && (
               <span
                 style={{
-                  marginLeft: 12,
-                  fontSize: 14,
+                  flex: "0 0 auto",
+                  fontSize: 13,
                   color: "#38bdf8",
                   background: "rgba(37,99,235,0.22)",
                   border: "1px solid rgba(56,189,248,0.18)",
-                  padding: "8px 10px",
+                  padding: "7px 10px",
                   borderRadius: 10,
-                  verticalAlign: "middle",
+                  fontWeight: 800,
+                  whiteSpace: "nowrap",
                 }}
               >
                 Projeto Ativo
               </span>
             )}
-          </h1>
+          </div>
+
           {projetoPainel && statusSincronizacaoAutomatica !== "idle" && (
             <div
               style={{
@@ -11473,7 +12495,18 @@ export default function DubworksManager() {
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: isMobile ? "grid" : "flex",
+            gridTemplateColumns: isMobile
+              ? "repeat(2, minmax(0, 1fr))"
+              : undefined,
+            gap: 10,
+            flexWrap: "wrap",
+            width: isMobile ? "100%" : "auto",
+            minWidth: 0,
+          }}
+        >
           {!isMobile && (
             <button
               onClick={() =>
@@ -11493,6 +12526,7 @@ export default function DubworksManager() {
               🔔 Notificações ({quantidadeNotificacoesNaoLidas})
             </button>
           )}
+
           {projetoPainel && (
             <button
               onClick={() => {
@@ -11500,38 +12534,62 @@ export default function DubworksManager() {
                 setRascunho(null);
                 setAbaProjeto("informacoes");
               }}
-              style={botaoSecundarioStyle}
+              style={{
+                ...botaoSecundarioStyle,
+                width: isMobile ? "100%" : undefined,
+                gridColumn: isMobile ? "1 / -1" : undefined,
+                whiteSpace: "normal",
+              }}
             >
               Fechar visualização
             </button>
           )}
+
           {projetoPainel && usuarioLogado?.cargo === "diretoria" && (
             <button
               onClick={() =>
                 alterarArquivamentoProjeto(!projetoPainel.Arquivado)
               }
-              style={botaoSecundarioStyle}
+              style={{
+                ...botaoSecundarioStyle,
+                width: isMobile ? "100%" : undefined,
+                minWidth: 0,
+              }}
             >
               {projetoPainel.Arquivado ? "Desarquivar" : "Arquivar"}
             </button>
           )}
+
           {podeCriarProjeto(usuarioLogado) && (
             <button
               onClick={() => {
                 limparFormularioProjeto();
                 setMostrarNovoProjeto(true);
               }}
-              style={botaoPrimarioStyle}
+              style={{
+                ...botaoPrimarioStyle,
+                width: isMobile ? "100%" : undefined,
+                minWidth: 0,
+              }}
             >
               Novo projeto
             </button>
           )}
+
           <button
             onClick={async () => {
               await recarregarProjetos();
               alert("Projetos atualizados.");
             }}
-            style={botaoSecundarioStyle}
+            style={{
+              ...botaoSecundarioStyle,
+              width: isMobile ? "100%" : undefined,
+              minWidth: 0,
+              gridColumn:
+                isMobile && !(projetoPainel && usuarioLogado?.cargo === "diretoria")
+                  ? "1 / -1"
+                  : undefined,
+            }}
           >
             Atualizar
           </button>
@@ -11631,7 +12689,16 @@ export default function DubworksManager() {
       )}
 
       {projetoPainel && (
-        <div style={tabsDarkStyle}>
+        <div
+          style={{
+            ...tabsDarkStyle,
+            overflowX: isMobile ? "auto" : tabsDarkStyle.overflowX,
+            overflowY: "hidden",
+            flexWrap: isMobile ? "nowrap" : tabsDarkStyle.flexWrap,
+            WebkitOverflowScrolling: "touch",
+            scrollbarWidth: "thin",
+          }}
+        >
           {[
             ["informacoes", "ⓘ Informações"],
             ["selecao", "🎭 Seleção"],
@@ -11653,6 +12720,10 @@ export default function DubworksManager() {
                   abaProjeto === id
                     ? "2px solid #38bdf8"
                     : "2px solid transparent",
+                flex: isMobile ? "0 0 auto" : tabButtonDarkStyle.flex,
+                whiteSpace: "nowrap",
+                minWidth: isMobile ? "max-content" : tabButtonDarkStyle.minWidth,
+                paddingInline: isMobile ? 14 : tabButtonDarkStyle.paddingInline,
               }}
             >
               {label}
@@ -12806,6 +13877,69 @@ export default function DubworksManager() {
               )}
             </div>
 
+            {permissaoNotificacaoSistema !== "indisponivel" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  padding: "10px 14px",
+                  borderBottom: "1px solid rgba(148,163,184,.10)",
+                  background: "rgba(15,23,42,.46)",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      color: "#cbd5e1",
+                      fontSize: 11,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Notificações no celular
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 9, marginTop: 2 }}>
+                    {permissaoNotificacaoSistema === "granted"
+                      ? "Ativadas neste navegador"
+                      : permissaoNotificacaoSistema === "denied"
+                      ? "Bloqueadas pelo navegador"
+                      : "Toque em Ativar para permitir"}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={ativarNotificacoesSistema}
+                  disabled={permissaoNotificacaoSistema === "granted"}
+                  style={{
+                    flex: "0 0 auto",
+                    border: "1px solid rgba(96,165,250,.25)",
+                    borderRadius: 9,
+                    padding: "7px 10px",
+                    color:
+                      permissaoNotificacaoSistema === "granted"
+                        ? "#86efac"
+                        : "#bfdbfe",
+                    background:
+                      permissaoNotificacaoSistema === "granted"
+                        ? "rgba(34,197,94,.10)"
+                        : "rgba(37,99,235,.14)",
+                    cursor:
+                      permissaoNotificacaoSistema === "granted"
+                        ? "default"
+                        : "pointer",
+                    fontSize: 10,
+                    fontWeight: 900,
+                  }}
+                >
+                  {permissaoNotificacaoSistema === "granted"
+                    ? "✓ Ativadas"
+                    : "Ativar"}
+                </button>
+              </div>
+            )}
+
             <div
               style={{
                 maxHeight: "560px",
@@ -13134,28 +14268,35 @@ export default function DubworksManager() {
             </div>
 
             <nav className="dw-mobile-drawer-nav">
-              <button
-                type="button"
-                className={telaAtual === "projetos" ? "active" : ""}
-                onClick={() => {
-                  setMostrarMembros(false);
-                  setMostrarAdvertencias(false);
-                  setMostrarUsuarios(false);
-                  setMostrarRelatorios(false);
-                  setMostrarTreinamentos(false);
-                  setMostrarFerramentas(false);
-                  setMostrarFormNovoUsuario(false);
-                  setMenuMobileAberto(false);
-                }}
-              >
-                ▣ Projetos
-              </button>
+              {temAcesso(usuarioLogado, "acesso_projetos") &&
+                usuarioLogado.cargo !== "marketing" && (
+                  <button
+                    type="button"
+                    className={telaAtual === "projetos" ? "active" : ""}
+                    onClick={() => {
+                      setMostrarEventos(false);
+                      setMostrarMarketing(false);
+                      setMostrarMembros(false);
+                      setMostrarAdvertencias(false);
+                      setMostrarUsuarios(false);
+                      setMostrarRelatorios(false);
+                      setMostrarTreinamentos(false);
+                      setMostrarFerramentas(false);
+                      setMostrarFormNovoUsuario(false);
+                      setMenuMobileAberto(false);
+                    }}
+                  >
+                    ▣ Projetos
+                  </button>
+                )}
 
               {temAcesso(usuarioLogado, "acesso_membros") && (
                 <button
                   type="button"
                   className={telaAtual === "membros" ? "active" : ""}
                   onClick={() => {
+                    setMostrarEventos(false);
+                    setMostrarMarketing(false);
                     setMostrarMembros(true);
                     setMostrarAdvertencias(false);
                     setMostrarUsuarios(false);
@@ -13167,7 +14308,7 @@ export default function DubworksManager() {
                     setMenuMobileAberto(false);
                   }}
                 >
-                  👥 Membros
+                  👥 {usuarioLogado.cargo === "analista_rr" ? "Central de RR" : "Membros"}
                 </button>
               )}
 
@@ -13176,6 +14317,8 @@ export default function DubworksManager() {
                   type="button"
                   className={telaAtual === "usuarios" ? "active" : ""}
                   onClick={() => {
+                    setMostrarEventos(false);
+                    setMostrarMarketing(false);
                     setMostrarUsuarios(true);
                     setMostrarAdvertencias(false);
                     setMostrarMembros(false);
@@ -13199,41 +14342,69 @@ export default function DubworksManager() {
                 </button>
               )}
 
-              <button
-                type="button"
-                className={telaAtual === "relatorios" ? "active" : ""}
-                onClick={() => {
-                  setMostrarRelatorios(true);
-                  setMostrarAdvertencias(false);
-                  setMostrarMembros(false);
-                  setMostrarUsuarios(false);
-                  setMostrarTreinamentos(false);
-                  setMostrarFerramentas(false);
-                  setMostrarFormNovoUsuario(false);
-                  setMenuMobileAberto(false);
-                }}
-              >
-                ▥ Relatórios
-              </button>
+              {podeCriarEventos && (
+                <button
+                  type="button"
+                  className={telaAtual === "eventos" ? "active" : ""}
+                  onClick={abrirTelaEventos}
+                >
+                  📅 Eventos
+                </button>
+              )}
 
-              <button
-                type="button"
-                className={telaAtual === "ferramentas" ? "active" : ""}
-                onClick={abrirTelaFerramentas}
-              >
-                🧰 Ferramentas
-              </button>
+              {podeVerMarketing && (
+                <button
+                  type="button"
+                  className={telaAtual === "marketing" ? "active" : ""}
+                  onClick={abrirTelaMarketing}
+                >
+                  📣 Marketing
+                </button>
+              )}
 
-              <button
-                type="button"
-                className={telaAtual === "treinamentos" ? "active" : ""}
-                onClick={() => {
-                  abrirTelaTreinamentos();
-                  setMenuMobileAberto(false);
-                }}
-              >
-                ◇ Treinamentos
-              </button>
+              {podeVerRelatorios && (
+                <button
+                  type="button"
+                  className={telaAtual === "relatorios" ? "active" : ""}
+                  onClick={() => {
+                    setMostrarEventos(false);
+                    setMostrarMarketing(false);
+                    setMostrarRelatorios(true);
+                    setMostrarAdvertencias(false);
+                    setMostrarMembros(false);
+                    setMostrarUsuarios(false);
+                    setMostrarTreinamentos(false);
+                    setMostrarFerramentas(false);
+                    setMostrarFormNovoUsuario(false);
+                    setMenuMobileAberto(false);
+                  }}
+                >
+                  ▥ Relatórios
+                </button>
+              )}
+
+              {podeVerFerramentasGerais && (
+                <button
+                  type="button"
+                  className={telaAtual === "ferramentas" ? "active" : ""}
+                  onClick={abrirTelaFerramentas}
+                >
+                  🧰 Ferramentas
+                </button>
+              )}
+
+              {temAcesso(usuarioLogado, "acesso_treinamentos") && (
+                <button
+                  type="button"
+                  className={telaAtual === "treinamentos" ? "active" : ""}
+                  onClick={() => {
+                    abrirTelaTreinamentos();
+                    setMenuMobileAberto(false);
+                  }}
+                >
+                  ◇ Treinamentos
+                </button>
+              )}
 
               <button type="button" className="danger" onClick={sair}>
                 ⇢ Sair
@@ -13366,27 +14537,40 @@ export default function DubworksManager() {
           }}
         >
           {!isMobile && <div style={sideSectionDarkStyle}>MENU</div>}
-          <SidebarItem
-            id="projetos"
-            label={isMobile ? "" : "Projetos"}
-            icon="▣"
-            onClick={() => {
-              setMostrarMembros(false);
-              setMostrarAdvertencias(false);
-              setMostrarUsuarios(false);
-              setMostrarRelatorios(false);
-              setMostrarTreinamentos(false);
-              setMostrarFerramentas(false);
-              setMostrarFormNovoUsuario(false);
-              setMenuMobileAberto(false);
-            }}
-          />
+          {temAcesso(usuarioLogado, "acesso_projetos") &&
+            usuarioLogado.cargo !== "marketing" && (
+              <SidebarItem
+                id="projetos"
+                label={isMobile ? "" : "Projetos"}
+                icon="▣"
+                onClick={() => {
+                  setMostrarEventos(false);
+                  setMostrarMarketing(false);
+                  setMostrarMembros(false);
+                  setMostrarAdvertencias(false);
+                  setMostrarUsuarios(false);
+                  setMostrarRelatorios(false);
+                  setMostrarTreinamentos(false);
+                  setMostrarFerramentas(false);
+                  setMostrarFormNovoUsuario(false);
+                  setMenuMobileAberto(false);
+                }}
+              />
+            )}
           {temAcesso(usuarioLogado, "acesso_membros") && (
             <SidebarItem
               id="membros"
-              label={isMobile ? "" : "Membros"}
+              label={
+                isMobile
+                  ? ""
+                  : usuarioLogado.cargo === "analista_rr"
+                  ? "Central de RR"
+                  : "Membros"
+              }
               icon="👥"
               onClick={() => {
+                setMostrarEventos(false);
+                setMostrarMarketing(false);
                 setMostrarMembros(true);
                 setMostrarAdvertencias(false);
                 setMostrarUsuarios(false);
@@ -13405,6 +14589,8 @@ export default function DubworksManager() {
               label={isMobile ? "" : "Usuários"}
               icon="♙"
               onClick={() => {
+                setMostrarEventos(false);
+                setMostrarMarketing(false);
                 setMostrarUsuarios(true);
                 setMostrarAdvertencias(false);
                 setMostrarMembros(false);
@@ -13423,22 +14609,45 @@ export default function DubworksManager() {
               onClick={abrirTelaAdvertencias}
             />
           )}
-          <SidebarItem
-            id="relatorios"
-            label={isMobile ? "" : "Relatórios"}
-            icon="▥"
-            onClick={() => {
-              setMostrarRelatorios(true);
-              setMostrarAdvertencias(false);
-              setMostrarMembros(false);
-              setMostrarUsuarios(false);
-              setMostrarTreinamentos(false);
-              setMostrarFerramentas(false);
-              setMostrarFormNovoUsuario(false);
-              setMenuMobileAberto(false);
-            }}
-          />
-          {!isMobile && (
+
+          {podeCriarEventos && (
+            <SidebarItem
+              id="eventos"
+              label={isMobile ? "" : "Eventos"}
+              icon="📅"
+              onClick={abrirTelaEventos}
+            />
+          )}
+
+          {podeVerMarketing && (
+            <SidebarItem
+              id="marketing"
+              label={isMobile ? "" : "Marketing"}
+              icon="📣"
+              onClick={abrirTelaMarketing}
+            />
+          )}
+
+          {podeVerRelatorios && (
+            <SidebarItem
+              id="relatorios"
+              label={isMobile ? "" : "Relatórios"}
+              icon="▥"
+              onClick={() => {
+                setMostrarEventos(false);
+                setMostrarMarketing(false);
+                setMostrarRelatorios(true);
+                setMostrarAdvertencias(false);
+                setMostrarMembros(false);
+                setMostrarUsuarios(false);
+                setMostrarTreinamentos(false);
+                setMostrarFerramentas(false);
+                setMostrarFormNovoUsuario(false);
+                setMenuMobileAberto(false);
+              }}
+            />
+          )}
+          {!isMobile && podeVerFerramentasGerais && (
             <SidebarItem
               id="ferramentas"
               label="Ferramentas"
@@ -13449,7 +14658,7 @@ export default function DubworksManager() {
               }}
             />
           )}
-          {!isMobile && (
+          {!isMobile && temAcesso(usuarioLogado, "acesso_treinamentos") && (
             <SidebarItem
               id="treinamentos"
               label="Treinamentos"
@@ -13512,6 +14721,10 @@ export default function DubworksManager() {
           ? TrainingPage()
           : telaAtual === "advertencias"
           ? AdvertenciasPage()
+          : telaAtual === "eventos"
+          ? EventsPage()
+          : telaAtual === "marketing"
+          ? MarketingPage()
           : telaAtual === "membros"
           ? MembersPage()
           : telaAtual === "usuarios"
@@ -13581,6 +14794,28 @@ export default function DubworksManager() {
                       : "Compromisso geral"}
                   </strong>
                 </div>
+
+                <div style={agendaInfoCardStyle}>
+                  <div style={agendaInfoLabelStyle}>STATUS</div>
+                  <strong
+                    style={{
+                      color:
+                        eventoAgendaSelecionado.status === "aprovado"
+                          ? "#86efac"
+                          : eventoAgendaSelecionado.status === "rejeitado"
+                          ? "#fca5a5"
+                          : "#fde68a",
+                    }}
+                  >
+                    {eventoAgendaSelecionado.status === "aprovado"
+                      ? "Aprovado"
+                      : eventoAgendaSelecionado.status === "rejeitado"
+                      ? "Rejeitado"
+                      : eventoAgendaSelecionado.status === "rascunho"
+                      ? "Rascunho"
+                      : "Aguardando aprovação"}
+                  </strong>
+                </div>
               </div>
 
               {eventoAgendaSelecionado.descricao && (
@@ -13621,31 +14856,35 @@ export default function DubworksManager() {
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  style={botaoSecundarioStyle}
-                  onClick={() =>
-                    editarCompromissoAgenda(eventoAgendaSelecionado)
-                  }
-                >
-                  ✎ Editar
-                </button>
+                {podeAlterarEventoAgenda(eventoAgendaSelecionado) && (
+                  <>
+                    <button
+                      type="button"
+                      style={botaoSecundarioStyle}
+                      onClick={() =>
+                        editarCompromissoAgenda(eventoAgendaSelecionado)
+                      }
+                    >
+                      ✎ Editar
+                    </button>
 
-                <button
-                  type="button"
-                  style={{
-                    ...botaoSecundarioStyle,
-                    color: "#fecaca",
-                    border: "1px solid rgba(248,113,113,.28)",
-                    background: "rgba(127,29,29,.16)",
-                  }}
-                  disabled={salvandoAgenda}
-                  onClick={() =>
-                    excluirCompromissoAgenda(eventoAgendaSelecionado)
-                  }
-                >
-                  Excluir
-                </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...botaoSecundarioStyle,
+                        color: "#fecaca",
+                        border: "1px solid rgba(248,113,113,.28)",
+                        background: "rgba(127,29,29,.16)",
+                      }}
+                      disabled={salvandoAgenda}
+                      onClick={() =>
+                        excluirCompromissoAgenda(eventoAgendaSelecionado)
+                      }
+                    >
+                      Excluir
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ) : (
@@ -13834,7 +15073,9 @@ export default function DubworksManager() {
                     ? "Salvando..."
                     : modoModalAgenda === "editar"
                     ? "Salvar alterações"
-                    : "Salvar compromisso"}
+                    : podeAprovarEventos
+                    ? "Salvar e publicar"
+                    : "Enviar para aprovação"}
                 </button>
               </div>
             </div>
@@ -13842,17 +15083,227 @@ export default function DubworksManager() {
         </Modal>
       )}
 
+      {mostrarNovaAdvertencia && (
+        <Modal
+          titulo="Nova advertência"
+          onClose={() => {
+            if (salvandoAdvertencia) return;
+            setMostrarNovaAdvertencia(false);
+          }}
+        >
+          <div style={{ display: "grid", gap: 15 }}>
+            <div
+              style={{
+                borderRadius: 13,
+                padding: 13,
+                background: "rgba(37,99,235,.09)",
+                border: "1px solid rgba(59,130,246,.18)",
+                color: "#bfdbfe",
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              Registrada por <strong>{usuarioLogado?.nome || "Usuário"}</strong>.
+              Ela ficará pendente até a aprovação da Diretoria.
+            </div>
+
+            <div>
+              <label style={labelStyle}>Membro / telefone do advertido *</label>
+              <input
+                list="membros-advertencia"
+                value={novaAdvertencia.advertido_telefone}
+                onChange={(event) =>
+                  setNovaAdvertencia((anterior) => ({
+                    ...anterior,
+                    advertido_telefone: event.target.value,
+                  }))
+                }
+                placeholder="Selecione um membro ou digite o telefone"
+                style={inputStyle}
+              />
+              <datalist id="membros-advertencia">
+                {membros
+                  .filter((membro) => Boolean(membro.telefone))
+                  .map((membro) => (
+                    <option
+                      key={`${membro.id || membro.nome}-${membro.telefone}`}
+                      value={membro.telefone}
+                    >
+                      {membro.nome}
+                    </option>
+                  ))}
+              </datalist>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <div>
+                <label style={labelStyle}>Data da ocorrência *</label>
+                <input
+                  type="date"
+                  value={novaAdvertencia.data_ocorrencia}
+                  onChange={(event) =>
+                    setNovaAdvertencia((anterior) => ({
+                      ...anterior,
+                      data_ocorrencia: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Pontuação</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={novaAdvertencia.valor}
+                  onChange={(event) =>
+                    setNovaAdvertencia((anterior) => ({
+                      ...anterior,
+                      valor: event.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Telefone do moderador</label>
+              <input
+                value={novaAdvertencia.moderador_telefone}
+                onChange={(event) =>
+                  setNovaAdvertencia((anterior) => ({
+                    ...anterior,
+                    moderador_telefone: event.target.value,
+                  }))
+                }
+                placeholder="Opcional"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Descrição da ocorrência *</label>
+              <textarea
+                value={novaAdvertencia.descricao}
+                onChange={(event) =>
+                  setNovaAdvertencia((anterior) => ({
+                    ...anterior,
+                    descricao: event.target.value,
+                  }))
+                }
+                placeholder="Informe o motivo, horário, local e os detalhes relevantes..."
+                style={{ ...textareaStyle, minHeight: 135 }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Links das provas</label>
+              <textarea
+                value={novaAdvertencia.provas}
+                onChange={(event) =>
+                  setNovaAdvertencia((anterior) => ({
+                    ...anterior,
+                    provas: event.target.value,
+                  }))
+                }
+                placeholder={"Cole um link do Drive por linha\nhttps://drive.google.com/..."}
+                style={{ ...textareaStyle, minHeight: 95 }}
+              />
+              <div style={{ color: "#64748b", fontSize: 11, marginTop: 6 }}>
+                Você pode adicionar mais de uma prova, usando uma linha para cada
+                link.
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                type="button"
+                disabled={salvandoAdvertencia}
+                onClick={() => setMostrarNovaAdvertencia(false)}
+                style={botaoSecundarioStyle}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={salvandoAdvertencia}
+                onClick={() => void salvarNovaAdvertencia()}
+                style={botaoPrimarioStyle}
+              >
+                {salvandoAdvertencia
+                  ? "Enviando..."
+                  : "Enviar para aprovação"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {advertenciaSelecionada && (
         <Modal
-          titulo={`Advertência — linha ${advertenciaSelecionada.linha}`}
+          titulo={
+            advertenciaSelecionada.origem === "sistema"
+              ? `Advertência #${advertenciaSelecionada.linha}`
+              : `Advertência — linha ${advertenciaSelecionada.linha}`
+          }
           onClose={() => setAdvertenciaSelecionada(null)}
         >
           {(() => {
             const membro = membroDaAdvertencia(advertenciaSelecionada);
             const valor = String(advertenciaSelecionada.valor || "").trim();
+            const statusModal =
+              advertenciaSelecionada.status === "aprovado"
+                ? {
+                    label: "Advertência aprovada",
+                    cor: "#86efac",
+                    fundo: "rgba(22,101,52,.18)",
+                    borda: "rgba(74,222,128,.26)",
+                  }
+                : advertenciaSelecionada.status === "rejeitado"
+                ? {
+                    label: "Advertência rejeitada",
+                    cor: "#fca5a5",
+                    fundo: "rgba(127,29,29,.18)",
+                    borda: "rgba(248,113,113,.26)",
+                  }
+                : {
+                    label: "Aguardando aprovação da Diretoria",
+                    cor: "#fde68a",
+                    fundo: "rgba(120,53,15,.20)",
+                    borda: "rgba(245,158,11,.30)",
+                  };
 
             return (
               <div style={{ display: "grid", gap: 14 }}>
+                <div
+                  style={{
+                    borderRadius: 12,
+                    padding: 12,
+                    color: statusModal.cor,
+                    background: statusModal.fundo,
+                    border: `1px solid ${statusModal.borda}`,
+                    fontWeight: 900,
+                    fontSize: 13,
+                  }}
+                >
+                  {statusModal.label}
+                </div>
                 <div
                   style={{
                     display: "grid",
@@ -13909,8 +15360,22 @@ export default function DubworksManager() {
                         marginTop: 5,
                       }}
                     >
-                      {advertenciaSelecionada.moderador_telefone || "—"}
+                      {advertenciaSelecionada.moderador_nome ||
+                        advertenciaSelecionada.moderador_telefone ||
+                        "—"}
                     </div>
+                    {advertenciaSelecionada.moderador_nome &&
+                      advertenciaSelecionada.moderador_telefone && (
+                        <div
+                          style={{
+                            color: "#94a3b8",
+                            fontSize: 12,
+                            marginTop: 4,
+                          }}
+                        >
+                          {advertenciaSelecionada.moderador_telefone}
+                        </div>
+                      )}
                   </div>
                 </div>
 
@@ -14029,6 +15494,83 @@ export default function DubworksManager() {
                     </div>
                   )}
                 </div>
+
+                {advertenciaSelecionada.decidido_por && (
+                  <div
+                    style={{
+                      borderRadius: 12,
+                      padding: 12,
+                      background: "rgba(15,23,42,.54)",
+                      border: "1px solid rgba(148,163,184,.12)",
+                      color: "#cbd5e1",
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    Decisão por <strong>{advertenciaSelecionada.decidido_por}</strong>
+                    {advertenciaSelecionada.decidido_em
+                      ? ` em ${new Date(
+                          advertenciaSelecionada.decidido_em
+                        ).toLocaleString("pt-BR")}`
+                      : ""}
+                    {advertenciaSelecionada.motivo_decisao && (
+                      <div style={{ marginTop: 7 }}>
+                        Motivo: {advertenciaSelecionada.motivo_decisao}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {podeAprovarAdvertencias &&
+                  advertenciaSelecionada.origem === "sistema" &&
+                  advertenciaSelecionada.status === "pendente" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        gap: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        disabled={
+                          decidindoAdvertenciaId === advertenciaSelecionada.linha
+                        }
+                        onClick={() =>
+                          void decidirAdvertencia(
+                            advertenciaSelecionada,
+                            "rejeitado"
+                          )
+                        }
+                        style={{
+                          ...botaoSecundarioStyle,
+                          color: "#fecaca",
+                          border: "1px solid rgba(248,113,113,.30)",
+                          background: "rgba(127,29,29,.16)",
+                        }}
+                      >
+                        Rejeitar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          decidindoAdvertenciaId === advertenciaSelecionada.linha
+                        }
+                        onClick={() =>
+                          void decidirAdvertencia(
+                            advertenciaSelecionada,
+                            "aprovado"
+                          )
+                        }
+                        style={botaoPrimarioStyle}
+                      >
+                        {decidindoAdvertenciaId === advertenciaSelecionada.linha
+                          ? "Salvando..."
+                          : "Aprovar advertência"}
+                      </button>
+                    </div>
+                  )}
               </div>
             );
           })()}
