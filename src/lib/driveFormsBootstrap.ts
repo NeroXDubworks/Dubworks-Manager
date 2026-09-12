@@ -1,8 +1,9 @@
-import { FORMS_COPIER_URL } from "../config/appConfig";
+import { supabase } from "./supabase";
 
 const DRIVE_STRUCTURE_URL =
   "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure";
 
+const FORMS_PROXY_URL = "/api/forms-copy";
 const INSTALL_FLAG = "__dubworksDriveFormsBootstrapInstalled";
 
 function extrairFolderId(urlOuId?: string) {
@@ -32,6 +33,14 @@ function mapearRetornoFormularios(data: any) {
     planilhaEntregas: data?.planilhaEntregas?.url || "",
     planilhaEntregasId: data?.planilhaEntregas?.id || "",
   };
+}
+
+function avisarFalhaFormularios(mensagem: string) {
+  if (typeof window === "undefined") return;
+
+  window.alert(
+    `As pastas do Drive foram criadas, mas os formulários NÃO foram criados.\n\n${mensagem}\n\nA estrutura existente foi preservada para não duplicar as pastas.`
+  );
 }
 
 function instalarCriacaoAutomaticaFormularios() {
@@ -106,14 +115,30 @@ function instalarCriacaoAutomaticaFormularios() {
           dadosDrive,
         }
       );
+      avisarFalhaFormularios(
+        "A integração do Drive não devolveu os IDs das pastas de Respostas da Seleção e Entregas."
+      );
       return respostaDrive;
     }
 
     try {
-      const respostaForms = await fetchOriginal(FORMS_COPIER_URL, {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token || "";
+
+      if (!accessToken) {
+        throw new Error(
+          "Sessão expirada antes da criação dos formulários. Entre novamente no Manager."
+        );
+      }
+
+      const respostaForms = await fetchOriginal(FORMS_PROXY_URL, {
         method: "POST",
         headers: {
-          "Content-Type": "text/plain;charset=utf-8",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           projectName: payload.projectName,
@@ -133,7 +158,7 @@ function instalarCriacaoAutomaticaFormularios() {
         throw new Error(
           dadosForms?.error ||
             dadosForms?.message ||
-            `Apps Script retornou HTTP ${respostaForms.status}`
+            `Proxy dos formulários retornou HTTP ${respostaForms.status}`
         );
       }
 
@@ -158,6 +183,11 @@ function instalarCriacaoAutomaticaFormularios() {
         "Pastas do Drive criadas, mas houve erro ao copiar os formulários:",
         erro
       );
+
+      avisarFalhaFormularios(
+        erro instanceof Error ? erro.message : String(erro || "Erro desconhecido")
+      );
+
       return respostaDrive;
     }
   };
