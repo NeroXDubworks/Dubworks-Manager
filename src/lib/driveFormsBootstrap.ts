@@ -1,8 +1,9 @@
-import { FORMS_COPIER_URL } from "../config/appConfig";
+import { supabase } from "./supabase";
 
 const DRIVE_STRUCTURE_URL =
   "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure";
 
+const FORMS_PROXY_URL = "/api/forms-copy";
 const INSTALL_FLAG = "__dubworksDriveFormsBootstrapInstalled";
 
 function extrairFolderId(urlOuId?: string) {
@@ -110,10 +111,23 @@ function instalarCriacaoAutomaticaFormularios() {
     }
 
     try {
-      const respostaForms = await fetchOriginal(FORMS_COPIER_URL, {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const accessToken = session?.access_token || "";
+
+      if (!accessToken) {
+        throw new Error(
+          "Sessão expirada antes da criação dos formulários. Entre novamente no Manager."
+        );
+      }
+
+      const respostaForms = await fetchOriginal(FORMS_PROXY_URL, {
         method: "POST",
         headers: {
-          "Content-Type": "text/plain;charset=utf-8",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           projectName: payload.projectName,
@@ -133,7 +147,7 @@ function instalarCriacaoAutomaticaFormularios() {
         throw new Error(
           dadosForms?.error ||
             dadosForms?.message ||
-            `Apps Script retornou HTTP ${respostaForms.status}`
+            `Proxy dos formulários retornou HTTP ${respostaForms.status}`
         );
       }
 
