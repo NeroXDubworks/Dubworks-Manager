@@ -6,7 +6,9 @@ const SUPABASE_PUBLISHABLE_KEY =
   "sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT";
 
 function responder(res, status, payload) {
-  res.status(status).setHeader("Cache-Control", "no-store").json(payload);
+  res.status(status);
+  res.setHeader("Cache-Control", "no-store");
+  return res.json(payload);
 }
 
 async function validarSessao(req) {
