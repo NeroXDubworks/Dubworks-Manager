@@ -35,6 +35,14 @@ function mapearRetornoFormularios(data: any) {
   };
 }
 
+function avisarFalhaFormularios(mensagem: string) {
+  if (typeof window === "undefined") return;
+
+  window.alert(
+    `As pastas do Drive foram criadas, mas os formulários NÃO foram criados.\n\n${mensagem}\n\nA estrutura existente foi preservada para não duplicar as pastas.`
+  );
+}
+
 function instalarCriacaoAutomaticaFormularios() {
   if (typeof globalThis.fetch !== "function") return;
 
@@ -107,6 +115,9 @@ function instalarCriacaoAutomaticaFormularios() {
           dadosDrive,
         }
       );
+      avisarFalhaFormularios(
+        "A integração do Drive não devolveu os IDs das pastas de Respostas da Seleção e Entregas."
+      );
       return respostaDrive;
     }
 
@@ -172,6 +183,11 @@ function instalarCriacaoAutomaticaFormularios() {
         "Pastas do Drive criadas, mas houve erro ao copiar os formulários:",
         erro
       );
+
+      avisarFalhaFormularios(
+        erro instanceof Error ? erro.message : String(erro || "Erro desconhecido")
+      );
+
       return respostaDrive;
     }
   };
