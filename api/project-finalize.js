@@ -3,7 +3,7 @@ export const config = {
 };
 
 const APPS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyzrhc1T-MtsXU7cUmTcmfAKFBR3DxqeJyWwcBpJrIcpc2t92NN6tzsR6EkgHPjkFnD/exec";
+  "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
 
 const SUPABASE_URL = "https://omgjbafqukpzdhhpdlaa.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
