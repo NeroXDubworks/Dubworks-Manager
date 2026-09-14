@@ -82,6 +82,20 @@ function normalizarElenco(valor) {
     .filter((item) => item.personagem);
 }
 
+function limparRespostaGoogle(texto) {
+  return String(texto || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 900);
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -160,12 +174,17 @@ export default async function handler(req, res) {
     }
 
     if (!response.ok) {
+      const detalheGoogle = limparRespostaGoogle(texto);
+      const origem = response.url ? ` URL final: ${response.url}` : "";
+
       return responder(res, 502, {
         ok: false,
         error:
           data?.error ||
           data?.message ||
-          `Apps Script retornou HTTP ${response.status}.`,
+          `Apps Script retornou HTTP ${response.status}.${origem}${
+            detalheGoogle ? ` Resposta do Google: ${detalheGoogle}` : ""
+          }`,
       });
     }
 
