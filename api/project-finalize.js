@@ -2,7 +2,7 @@ export const config = {
   maxDuration: 60,
 };
 
-const FORMS_COPIER_URL =
+const APPS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbxUWpXU_5o3hfLOpnUTfgyg1O9NO0IKoaJTcbWUTXqZJmPcoc3GqdchtvYBAut7Jwbd/exec";
 
 const SUPABASE_URL = "https://omgjbafqukpzdhhpdlaa.supabase.co";
@@ -13,6 +13,20 @@ function responder(res, status, payload) {
   res.status(status);
   res.setHeader("Cache-Control", "no-store");
   return res.json(payload);
+}
+
+function lerBody(req) {
+  if (req.body && typeof req.body === "object") return req.body;
+
+  if (typeof req.body === "string") {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
 }
 
 async function validarSessao(req) {
@@ -32,51 +46,6 @@ async function validarSessao(req) {
   return response.ok;
 }
 
-function lerBody(req) {
-  if (req.body && typeof req.body === "object") return req.body;
-
-  if (typeof req.body === "string") {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
-
-function normalizarPersonagens(valor) {
-  if (!Array.isArray(valor)) return [];
-
-  const vistos = new Set();
-  const resultado = [];
-
-  for (const item of valor) {
-    const personagem = String(item || "").trim();
-    const chave = personagem.toLocaleLowerCase("pt-BR");
-
-    if (!personagem || vistos.has(chave)) continue;
-    vistos.add(chave);
-    resultado.push(personagem);
-  }
-
-  return resultado;
-}
-
-function normalizarElenco(valor) {
-  if (!Array.isArray(valor)) return [];
-
-  return valor
-    .map((item) => ({
-      personagem: String(item?.personagem || "").trim(),
-      dublador: String(item?.dublador || "").trim(),
-      telefone_dublador: String(item?.telefone_dublador || "").trim(),
-      funcao: String(item?.funcao || "").trim(),
-    }))
-    .filter((item) => item.personagem);
-}
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -94,23 +63,23 @@ export default async function handler(req, res) {
     }
 
     const body = lerBody(req);
+    const projectId = String(body?.projectId || "").trim();
     const projectName = String(body?.projectName || "").trim();
-    const respostasSelecaoFolderId = String(
-      body?.respostasSelecaoFolderId || ""
-    ).trim();
-    const entregasFolderId = String(body?.entregasFolderId || "").trim();
-    const elenco = normalizarElenco(body?.elenco);
-    const personagens = normalizarPersonagens(
-      Array.isArray(body?.personagens)
-        ? body.personagens
-        : elenco.map((item) => item.personagem)
-    );
+    const projetoFolderId = String(body?.projetoFolderId || "").trim();
+    const finalizadosFolderId = String(body?.finalizadosFolderId || "").trim();
+    const videoEditorLink = String(body?.videoEditorLink || "").trim();
 
-    if (!projectName || !respostasSelecaoFolderId || !entregasFolderId) {
+    if (!projetoFolderId || !finalizadosFolderId) {
       return responder(res, 400, {
         ok: false,
-        error:
-          "Nome do projeto e IDs das pastas de respostas/entregas são obrigatórios.",
+        error: "As pastas 2 | Projeto e 3 | Finalizado são obrigatórias.",
+      });
+    }
+
+    if (projetoFolderId === finalizadosFolderId) {
+      return responder(res, 400, {
+        ok: false,
+        error: "A pasta de origem não pode ser a mesma pasta de Finalizado.",
       });
     }
 
@@ -120,21 +89,24 @@ export default async function handler(req, res) {
     let response;
 
     try {
-      response = await fetch(FORMS_COPIER_URL, {
+      response = await fetch(APPS_SCRIPT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "text/plain;charset=utf-8",
         },
         body: JSON.stringify({
-          action: "preparar_formularios_projeto",
+          action: "finalizar_projeto",
+          projectId,
           projectName,
           projetoNome: projectName,
-          respostasSelecaoFolderId,
-          entregasFolderId,
-          personagens,
-          characters: personagens,
-          selectionCharacters: personagens,
-          elenco,
+          projetoFolderId,
+          projectFolderId: projetoFolderId,
+          sourceFolderId: projetoFolderId,
+          finalizadosFolderId,
+          finalFolderId: finalizadosFolderId,
+          destinationFolderId: finalizadosFolderId,
+          videoEditorLink,
+          moveVideosOnly: true,
         }),
         redirect: "follow",
         signal: controller.signal,
@@ -165,8 +137,7 @@ export default async function handler(req, res) {
     if (!data || typeof data !== "object") {
       return responder(res, 502, {
         ok: false,
-        error:
-          "O Apps Script respondeu, mas não devolveu JSON válido. Verifique a publicação do Web App e as permissões de acesso.",
+        error: "O Apps Script não devolveu JSON válido ao finalizar o projeto.",
       });
     }
 
@@ -174,23 +145,22 @@ export default async function handler(req, res) {
       return responder(res, 502, {
         ok: false,
         error: String(
-          data.error || data.message || "Falha ao copiar os formulários."
+          data.error || data.message || "O Apps Script não conseguiu mover os vídeos."
         ),
       });
     }
 
     return responder(res, 200, {
+      ok: true,
       ...data,
-      personagensEnviados: personagens,
-      totalPersonagensEnviados: personagens.length,
     });
   } catch (erro) {
-    console.error("Erro no proxy de formulários:", erro);
+    console.error("Erro ao finalizar arquivos do projeto:", erro);
 
     const mensagem =
       erro?.name === "AbortError"
-        ? "A criação dos formulários excedeu o tempo limite."
-        : erro?.message || "Erro interno ao criar os formulários.";
+        ? "A movimentação dos vídeos excedeu o tempo limite."
+        : erro?.message || "Erro interno ao mover os vídeos do projeto.";
 
     return responder(res, 500, { ok: false, error: mensagem });
   }
