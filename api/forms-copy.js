@@ -32,6 +32,11 @@ async function validarSessao(req) {
   return response.ok;
 }
 
+function extrairAccessToken(req) {
+  const authorization = String(req.headers.authorization || "").trim();
+  return authorization.replace(/^Bearer\s+/i, "").trim();
+}
+
 function lerBody(req) {
   if (req.body && typeof req.body === "object") return req.body;
 
@@ -93,6 +98,7 @@ export default async function handler(req, res) {
       });
     }
 
+    const accessToken = extrairAccessToken(req);
     const body = lerBody(req);
     const projectName = String(body?.projectName || "").trim();
     const respostasSelecaoFolderId = String(
@@ -127,6 +133,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           action: "preparar_formularios_projeto",
+          access_token: accessToken,
           projectName,
           projetoNome: projectName,
           respostasSelecaoFolderId,
