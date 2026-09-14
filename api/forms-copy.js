@@ -1,5 +1,5 @@
 export const config = {
-  maxDuration: 60,
+  maxDuration: 300,
 };
 
 const FORMS_COPIER_URL =
@@ -121,7 +121,7 @@ export default async function handler(req, res) {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(), 270000);
 
     let response;
 
