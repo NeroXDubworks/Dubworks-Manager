@@ -3,7 +3,7 @@ export const config = {
 };
 
 const FORMS_COPIER_URL =
-  "https://script.google.com/macros/s/AKfycbwdbYEQydYzSH3mKPc_sWagVmrSPFbNJIWRoAq2oLprtwjGHDioiD0CBQknZVL2sAsW/exec";
+  "https://script.google.com/macros/s/AKfycbxUWpXU_5o3hfLOpnUTfgyg1O9NO0IKoaJTcbWUTXqZJmPcoc3GqdchtvYBAut7Jwbd/exec";
 
 const SUPABASE_URL = "https://omgjbafqukpzdhhpdlaa.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
