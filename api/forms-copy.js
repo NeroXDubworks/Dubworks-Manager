@@ -46,6 +46,37 @@ function lerBody(req) {
   return null;
 }
 
+function normalizarPersonagens(valor) {
+  if (!Array.isArray(valor)) return [];
+
+  const vistos = new Set();
+  const resultado = [];
+
+  for (const item of valor) {
+    const personagem = String(item || "").trim();
+    const chave = personagem.toLocaleLowerCase("pt-BR");
+
+    if (!personagem || vistos.has(chave)) continue;
+    vistos.add(chave);
+    resultado.push(personagem);
+  }
+
+  return resultado;
+}
+
+function normalizarElenco(valor) {
+  if (!Array.isArray(valor)) return [];
+
+  return valor
+    .map((item) => ({
+      personagem: String(item?.personagem || "").trim(),
+      dublador: String(item?.dublador || "").trim(),
+      telefone_dublador: String(item?.telefone_dublador || "").trim(),
+      funcao: String(item?.funcao || "").trim(),
+    }))
+    .filter((item) => item.personagem);
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -68,6 +99,12 @@ export default async function handler(req, res) {
       body?.respostasSelecaoFolderId || ""
     ).trim();
     const entregasFolderId = String(body?.entregasFolderId || "").trim();
+    const elenco = normalizarElenco(body?.elenco);
+    const personagens = normalizarPersonagens(
+      Array.isArray(body?.personagens)
+        ? body.personagens
+        : elenco.map((item) => item.personagem)
+    );
 
     if (!projectName || !respostasSelecaoFolderId || !entregasFolderId) {
       return responder(res, 400, {
@@ -89,9 +126,15 @@ export default async function handler(req, res) {
           "Content-Type": "text/plain;charset=utf-8",
         },
         body: JSON.stringify({
+          action: "preparar_formularios_projeto",
           projectName,
+          projetoNome: projectName,
           respostasSelecaoFolderId,
           entregasFolderId,
+          personagens,
+          characters: personagens,
+          selectionCharacters: personagens,
+          elenco,
         }),
         redirect: "follow",
         signal: controller.signal,
@@ -136,7 +179,11 @@ export default async function handler(req, res) {
       });
     }
 
-    return responder(res, 200, data);
+    return responder(res, 200, {
+      ...data,
+      personagensEnviados: personagens,
+      totalPersonagensEnviados: personagens.length,
+    });
   } catch (erro) {
     console.error("Erro no proxy de formulários:", erro);
 
