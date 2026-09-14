@@ -2,7 +2,7 @@ import type { ChavePermissao } from "../types";
 
 export const LOGO_URL = "/Logo_dubworks.png";
 export const FORMS_COPIER_URL =
-  "https://script.google.com/macros/s/AKfycbxUWpXU_5o3hfLOpnUTfgyg1O9NO0IKoaJTcbWUTXqZJmPcoc3GqdchtvYBAut7Jwbd/exec";
+  "https://script.google.com/macros/s/AKfycbzc1AwswaQnSv4PGGyVGqH-8KebR-kmnFIBxygdeKEeVGGULSvxFT1DCOTiberXi7pQ/exec";
 
 export const permissoesDisponiveis: { chave: ChavePermissao; label: string }[] = [
   { chave: "acesso_projetos", label: "Projetos" },
