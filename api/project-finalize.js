@@ -46,6 +46,11 @@ async function validarSessao(req) {
   return response.ok;
 }
 
+function extrairAccessToken(req) {
+  const authorization = String(req.headers.authorization || "").trim();
+  return authorization.replace(/^Bearer\s+/i, "").trim();
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -62,6 +67,7 @@ export default async function handler(req, res) {
       });
     }
 
+    const accessToken = extrairAccessToken(req);
     const body = lerBody(req);
     const projectId = String(body?.projectId || "").trim();
     const projectName = String(body?.projectName || "").trim();
@@ -96,6 +102,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           action: "finalizar_projeto",
+          access_token: accessToken,
           projectId,
           projectName,
           projetoNome: projectName,
