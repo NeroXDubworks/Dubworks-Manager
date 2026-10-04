@@ -83,13 +83,21 @@ function prepararFormulariosProjeto_(payload) {
     payload.respostasSelecaoFolderId
   );
   const entregasFolderId = extrairId_(payload.entregasFolderId);
-  const personagens = normalizarLista_(
-    payload.personagens ||
-      payload.personagensSelecao ||
+  const personagensSelecao = normalizarLista_(
+    payload.personagensSelecao ||
+      payload.personagens ||
       payload.characters ||
       payload.selectionCharacters ||
       []
   );
+  const personagensEntregas = normalizarLista_(
+    payload.personagensEntregas ||
+      payload.deliveryCharacters ||
+      payload.elenco &&
+        payload.elenco.map(function (item) { return item.personagem; }) ||
+      personagensSelecao
+  );
+  const episodios = normalizarLista_(payload.episodios || []);
   const capaUrl = String(payload.capaUrl || payload.coverUrl || '').trim();
 
   if (!projectName) throw new Error('Nome do projeto não informado.');
@@ -99,10 +107,13 @@ function prepararFormulariosProjeto_(payload) {
   if (!entregasFolderId) {
     throw new Error('Pasta de Entregas não informada.');
   }
-  if (!personagens.length) {
+  if (!personagensSelecao.length) {
     throw new Error(
       'Nenhum personagem marcado como Em seleção foi recebido. O formulário não será criado com “A definir”.'
     );
+  }
+  if (!personagensEntregas.length) {
+    throw new Error('O Banco do Projeto está vazio; o formulário de Entregas não pode ser sincronizado.');
   }
 
   const props = PropertiesService.getScriptProperties();
@@ -146,7 +157,7 @@ function prepararFormulariosProjeto_(payload) {
   prepararFormulario_(selecao.form, {
     tipo: 'selecao',
     projectName: projectName,
-    personagens: personagens,
+    personagens: personagensSelecao,
     capaUrl: capaUrl,
   });
 
@@ -179,9 +190,10 @@ function prepararFormulariosProjeto_(payload) {
   prepararFormulario_(entregas.form, {
     tipo: 'entregas',
     projectName: projectName,
-    personagens: personagens,
+    personagens: personagensEntregas,
     capaUrl: capaUrl,
   });
+  atualizarEpisodiosEntregas_(entregas.form, episodios);
 
   const entregasSheet = garantirPlanilhaRespostas_(
     entregas.form,
@@ -205,7 +217,9 @@ function prepararFormulariosProjeto_(payload) {
   return {
     ok: true,
     projectName: projectName,
-    personagens: personagens,
+    personagens: personagensSelecao,
+    personagensEntregas: personagensEntregas,
+    episodios: episodios,
     formSelecao: infoFormulario_(selecao.form),
     formEntregas: infoFormulario_(entregas.form),
     planilhaSelecao: infoPlanilha_(selecaoSheet),
@@ -325,6 +339,34 @@ function atualizarPersonagens_(form, personagens) {
       .setChoiceValues(personagens)
       .setRequired(true);
   }
+}
+
+function atualizarEpisodiosEntregas_(form, episodios) {
+  if (!Array.isArray(episodios) || !episodios.length) return;
+
+  const aliases = ['episódio', 'episodio', 'episódio / corte', 'episodio / corte'];
+  const items = form.getItems();
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (aliases.indexOf(normalizarTexto_(item.getTitle())) === -1) continue;
+
+    if (item.getType() === FormApp.ItemType.LIST) {
+      item.asListItem().setChoiceValues(episodios).setRequired(true);
+      return;
+    }
+
+    if (item.getType() === FormApp.ItemType.MULTIPLE_CHOICE) {
+      item.asMultipleChoiceItem().setChoiceValues(episodios).setRequired(true);
+      return;
+    }
+  }
+
+  form
+    .addListItem()
+    .setTitle('Episódio')
+    .setChoiceValues(episodios)
+    .setRequired(true);
 }
 
 function garantirUploadTemplate_(form, tipo) {
@@ -561,15 +603,24 @@ function sincronizarFormulario_(payload, tipo) {
   if (!formId) throw new Error('Formulário não informado.');
 
   const personagens = normalizarLista_(
-    payload.personagens ||
-      payload.personagensSelecao ||
-      payload.characters ||
-      []
+    tipo === 'selecao'
+      ? payload.personagensSelecao ||
+          payload.personagens ||
+          payload.characters ||
+          []
+      : payload.personagensEntregas ||
+          payload.deliveryCharacters ||
+          payload.personagens ||
+          payload.characters ||
+          []
   );
+  const episodios = normalizarLista_(payload.episodios || []);
 
   if (!personagens.length) {
     throw new Error(
-      'Nenhum personagem marcado como Em seleção foi recebido.'
+      tipo === 'selecao'
+        ? 'Nenhum personagem marcado como Em seleção foi recebido.'
+        : 'O Banco do Projeto está vazio.'
     );
   }
 
@@ -584,6 +635,10 @@ function sincronizarFormulario_(payload, tipo) {
     personagens: personagens,
     capaUrl: String(payload.capaUrl || payload.coverUrl || '').trim(),
   });
+
+  if (tipo === 'entregas') {
+    atualizarEpisodiosEntregas_(form, episodios);
+  }
 
   return {
     ok: true,
