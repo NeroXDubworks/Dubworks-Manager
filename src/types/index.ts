@@ -71,6 +71,8 @@ export type ElencoItem = {
   status_entrega?: string;
   semana_atual?: string;
   video_entrega?: string;
+  /** Estado de UI/metadado: controla presença no Form de Seleção sem retirar do Banco. */
+  em_selecao?: boolean;
 };
 
 export type DriveStructureResult = {
@@ -178,6 +180,7 @@ export type AvaliacaoSelecao = {
 export type EntregaProducao = {
   id?: number;
   projeto_id: number;
+  episodio_id?: number | null;
   resposta_id: string;
   linha?: number | null;
   personagem: string;
