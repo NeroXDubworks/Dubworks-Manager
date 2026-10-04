@@ -58,6 +58,7 @@ import {
   mapProjetoDb,
   mapMembroDb,
   criarEstruturaDriveViaFunction,
+  criarAtualizarFormulariosProjeto,
   copiarFormulariosViaAppsScript,
   extrairGoogleFileId,
   extrairGoogleFolderId,
@@ -406,6 +407,8 @@ export default function DubworksManager() {
   const [novoElencoRascunho, setNovoElencoRascunho] =
     useState<ElencoItem>(elencoVazio);
   const [criandoEstruturaDrive, setCriandoEstruturaDrive] = useState(false);
+  const [sincronizandoFormulariosProjeto, setSincronizandoFormulariosProjeto] =
+    useState(false);
   const [respostasSelecao, setRespostasSelecao] = useState<RespostaSelecao[]>(
     []
   );
@@ -4873,6 +4876,136 @@ export default function DubworksManager() {
     }
   }
 
+  async function criarAtualizarFormulariosProjetoAtual() {
+    if (!rascunho || !projetoPainel) return;
+
+    if (!podeEditarProjeto(usuarioLogado, projetoPainel)) {
+      alert("Você não tem permissão para atualizar os formulários deste projeto.");
+      return;
+    }
+
+    const links = extrairLinksDrive(rascunho.Observacoes);
+    const respostasSelecaoFolderId = extrairGoogleFolderId(
+      links.respostasSelecao || ""
+    );
+    const entregasFolderId = extrairGoogleFolderId(
+      links.entregasProjeto || ""
+    );
+
+    if (!respostasSelecaoFolderId || !entregasFolderId) {
+      alert(
+        "Crie ou cadastre a estrutura do Drive antes de criar/atualizar os formulários."
+      );
+      return;
+    }
+
+    const personagensEntregas = (rascunho.Elenco || [])
+      .map((item) => item.personagem.trim())
+      .filter(Boolean);
+    const personagensSelecao = (rascunho.Elenco || [])
+      .filter((item) => item.em_selecao !== false)
+      .map((item) => item.personagem.trim())
+      .filter(Boolean);
+
+    try {
+      setSincronizandoFormulariosProjeto(true);
+
+      const { data: episodiosDb, error: erroEpisodios } = await supabase
+        .from("projeto_episodios")
+        .select("numero,titulo")
+        .eq("projeto_id", Number(projetoPainel.ID))
+        .order("numero", { ascending: true });
+
+      if (erroEpisodios && erroEpisodios.code !== "42P01") {
+        console.warn("Não foi possível carregar episódios para o Form:", erroEpisodios);
+      }
+
+      const episodios = (episodiosDb || []).map(
+        (item: any) =>
+          `EP ${String(item.numero || 0).padStart(2, "0")} - ${
+            String(item.titulo || "").trim() || "Sem título"
+          }`
+      );
+
+      const retorno = await criarAtualizarFormulariosProjeto({
+        projectId: projetoPainel.ID,
+        projectName: rascunho.Projeto || projetoPainel.Projeto,
+        projectType: rascunho.Tipo || projetoPainel.Tipo || "Projeto",
+        capaUrl: rascunho.Capa_URL || projetoPainel.Capa_URL || "",
+        respostasSelecaoFolderId,
+        entregasFolderId,
+        personagensSelecao,
+        personagensEntregas,
+        elenco: rascunho.Elenco || [],
+        episodios,
+        existingSelectionFormId: extrairGoogleFileId(links.formSelecao || ""),
+        existingDeliveriesFormId: extrairGoogleFileId(links.formEntregas || ""),
+      });
+
+      const lerUrl = (valor: any) =>
+        String(
+          valor?.viewUrl ||
+            valor?.formUrl ||
+            valor?.url ||
+            valor?.editUrl ||
+            valor ||
+            ""
+        ).trim();
+
+      const novosLinks = {
+        ...links,
+        formSelecao:
+          lerUrl(retorno.formSelecao || retorno?.data?.formSelecao) ||
+          links.formSelecao ||
+          "",
+        formEntregas:
+          lerUrl(retorno.formEntregas || retorno?.data?.formEntregas) ||
+          links.formEntregas ||
+          "",
+        planilhaSelecao:
+          lerUrl(retorno.planilhaSelecao || retorno?.data?.planilhaSelecao) ||
+          links.planilhaSelecao ||
+          "",
+        planilhaEntregas:
+          lerUrl(retorno.planilhaEntregas || retorno?.data?.planilhaEntregas) ||
+          links.planilhaEntregas ||
+          "",
+      };
+
+      const atualizado: Projeto = {
+        ...rascunho,
+        Observacoes: salvarLinksDriveEmObservacoes(
+          rascunho.Observacoes,
+          novosLinks
+        ),
+      };
+
+      const comHistorico = aplicarHistoricoAutomatico(
+        projetoPainel,
+        atualizado,
+        "criou/atualizou os formulários do projeto"
+      );
+
+      const ok = await atualizarProjetoBanco(comHistorico);
+      if (!ok) {
+        alert("Forms atualizados, mas não consegui salvar os links no projeto.");
+        return;
+      }
+
+      setRascunho(comHistorico);
+      await recarregarProjetos();
+      alert("Formulários de Seleção e Entregas atualizados com sucesso.");
+    } catch (erro: any) {
+      console.error("Erro ao criar/atualizar formulários:", erro);
+      alert(
+        erro?.message ||
+          "Não foi possível criar/atualizar os formulários deste projeto."
+      );
+    } finally {
+      setSincronizandoFormulariosProjeto(false);
+    }
+  }
+
   async function salvarLinksDriveComHistorico() {
     if (!rascunho || !projetoPainel) return;
 
@@ -7152,6 +7285,19 @@ export default function DubworksManager() {
               {criandoEstruturaDrive
                 ? "Criando estrutura..."
                 : "Criar estrutura no Drive"}
+            </button>
+
+            <button
+              onClick={criarAtualizarFormulariosProjetoAtual}
+              disabled={sincronizandoFormulariosProjeto}
+              style={{
+                ...botaoSecundarioStyle,
+                opacity: sincronizandoFormulariosProjeto ? 0.7 : 1,
+              }}
+            >
+              {sincronizandoFormulariosProjeto
+                ? "Atualizando Forms..."
+                : "Criar/atualizar formulários"}
             </button>
 
             <button
