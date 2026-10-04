@@ -23,6 +23,8 @@ const DW_CFG = {
   FORM_UPLOAD_TARGET_PREFIX: 'DUBWORKS_FORM_TARGET_',
   DEFAULT_SUPABASE_URL: 'https://omgjbafqukpzdhhpdlaa.supabase.co',
   DEFAULT_SUPABASE_KEY: 'sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT',
+  DEFAULT_TEMPLATE_SELECTION_ID: '1puXgJ0e-es4NDlD_3MsfFhAFtHBjpr4j9JzxK1ydWPw',
+  DEFAULT_TEMPLATE_DELIVERIES_ID: '1MQbh9HL63AMZT4hETQmkck5ltKVK2A6Pxx5GmZ3MWkk',
 };
 
 function doGet() {
@@ -118,10 +120,12 @@ function prepararFormulariosProjeto_(payload) {
 
   const props = PropertiesService.getScriptProperties();
   const templateSelectionId = extrairId_(
-    props.getProperty(DW_CFG.TEMPLATE_SELECTION_PROP)
+    props.getProperty(DW_CFG.TEMPLATE_SELECTION_PROP) ||
+      DW_CFG.DEFAULT_TEMPLATE_SELECTION_ID
   );
   const templateDeliveriesId = extrairId_(
-    props.getProperty(DW_CFG.TEMPLATE_DELIVERIES_PROP)
+    props.getProperty(DW_CFG.TEMPLATE_DELIVERIES_PROP) ||
+      DW_CFG.DEFAULT_TEMPLATE_DELIVERIES_ID
   );
 
   if (!templateSelectionId) {
