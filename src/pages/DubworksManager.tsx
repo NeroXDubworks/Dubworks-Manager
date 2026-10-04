@@ -81,6 +81,7 @@ import {
   atualizarProjetoBanco,
   atualizarArquivamentoProjetoBanco,
   salvarElencoProjetoBanco,
+  retirarElencoProjetoBanco,
   gerarIdTemporario,
   comTimeout,
   parseDataFlex,
@@ -387,6 +388,10 @@ export default function DubworksManager() {
   const timerFocoNotificacaoRef = useRef<number | null>(null);
 
   const [novoProjeto, setNovoProjeto] = useState<Projeto>(projetoVazio);
+  const [novoProjetoCategoria, setNovoProjetoCategoria] = useState("");
+  const [novoProjetoLiderEmail, setNovoProjetoLiderEmail] = useState("");
+  const [novoProjetoEditorEmail, setNovoProjetoEditorEmail] = useState("");
+  const [enviandoCapaProjeto, setEnviandoCapaProjeto] = useState(false);
   const [novoUsuario, setNovoUsuario] = useState<Usuario>({
     nome: "",
     login: "",
@@ -397,7 +402,7 @@ export default function DubworksManager() {
     ...permissoesPadraoUsuario("lider"),
   });
   const [novoElencoProjeto, setNovoElencoProjeto] =
-    useState<ElencoItem>(elencoVazio);
+    useState<ElencoItem>({ ...elencoVazio, em_selecao: true });
   const [novoElencoRascunho, setNovoElencoRascunho] =
     useState<ElencoItem>(elencoVazio);
   const [criandoEstruturaDrive, setCriandoEstruturaDrive] = useState(false);
@@ -4175,7 +4180,27 @@ export default function DubworksManager() {
 
   useEffect(() => {
     if (selecionado) {
-      setRascunho({ ...selecionado, Elenco: [...selecionado.Elenco] });
+      const meta = extrairMetaProjetoUI(selecionado.Observacoes);
+      const selecaoConfigurada = meta.selecao_configurada === true;
+      const selecionados = new Set(
+        (Array.isArray(meta.personagens_em_selecao)
+          ? meta.personagens_em_selecao
+          : []
+        )
+          .map((item: any) => normalizar(String(item || "")))
+          .filter(Boolean)
+      );
+
+      setRascunho({
+        ...selecionado,
+        Elenco: (selecionado.Elenco || []).map((item) => ({
+          ...item,
+          // Legado: enquanto a seleção nunca foi configurada, todos aparecem.
+          em_selecao: selecaoConfigurada
+            ? selecionados.has(normalizar(item.personagem))
+            : true,
+        })),
+      });
     } else {
       setRascunho(null);
     }
@@ -4486,9 +4511,63 @@ export default function DubworksManager() {
     setRascunho({ ...rascunho, [campo]: valor });
   }
 
+  async function uploadCapaProjetoArquivo(
+    arquivo: File,
+    destino: "novo" | "rascunho"
+  ) {
+    if (!arquivo.type.startsWith("image/")) {
+      alert("Selecione um arquivo de imagem.");
+      return;
+    }
+
+    try {
+      setEnviandoCapaProjeto(true);
+      const extensao =
+        arquivo.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ||
+        "jpg";
+      const identificador =
+        destino === "rascunho" && rascunho?.ID
+          ? `projeto-${rascunho.ID}`
+          : "novo-projeto";
+      const caminho = `${identificador}/${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 9)}.${extensao}`;
+
+      const { error } = await supabase.storage
+        .from("project-covers")
+        .upload(caminho, arquivo, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: arquivo.type || undefined,
+        });
+
+      if (error) throw error;
+
+      const { data } = supabase.storage
+        .from("project-covers")
+        .getPublicUrl(caminho);
+      const url = data.publicUrl;
+
+      if (destino === "novo") {
+        setNovoProjeto((anterior) => ({ ...anterior, Capa_URL: url }));
+      } else if (rascunho) {
+        setRascunho({ ...rascunho, Capa_URL: url });
+      }
+    } catch (erro: any) {
+      console.error("Erro ao enviar capa:", erro);
+      alert(erro?.message || "Não consegui enviar a capa.");
+    } finally {
+      setEnviandoCapaProjeto(false);
+    }
+  }
+
   function limparFormularioProjeto() {
     setNovoProjeto({
       ...projetoVazio,
+      Status: "Aguardando aprovação",
+      Prioridade: "",
+      Dupla: "",
+      Data_Inicio: "",
       Lider:
         usuarioLogado &&
         (usuarioLogado.cargo === "lider" ||
@@ -4496,24 +4575,92 @@ export default function DubworksManager() {
           ? usuarioLogado.vinculo || usuarioLogado.nome
           : "",
     });
-    setNovoElencoProjeto(elencoVazio);
+    setNovoProjetoCategoria("");
+    setNovoProjetoLiderEmail(
+      usuarioLogado &&
+        (usuarioLogado.cargo === "lider" ||
+          usuarioLogado.cargo === "lider_treinamento")
+        ? usuarioLogado.login || ""
+        : ""
+    );
+    setNovoProjetoEditorEmail("");
+    setNovoElencoProjeto({ ...elencoVazio, em_selecao: true });
   }
 
   async function criarProjeto() {
     if (!usuarioLogado || !podeCriarProjeto(usuarioLogado)) return;
 
-    if (!novoProjeto.Projeto.trim()) {
-      alert("Preencha pelo menos o nome do projeto.");
+    const nomeProjeto = novoProjeto.Projeto.trim();
+    const liderNome = novoProjeto.Lider.trim();
+    const liderEmail = novoProjetoLiderEmail.trim().toLowerCase();
+    const liderTelefone = novoProjeto.Telefone_Lider.trim();
+    const editorNome = novoProjeto.Editor.trim();
+    const editorEmail = novoProjetoEditorEmail.trim().toLowerCase();
+    const editorTelefone = novoProjeto.Telefone_Editor.trim();
+
+    if (!nomeProjeto) {
+      alert("Preencha o nome do projeto.");
       return;
     }
 
+    if (!liderNome || !liderEmail || !liderTelefone) {
+      alert("Nome, e-mail e telefone do líder são obrigatórios.");
+      return;
+    }
+
+    const usuarioLider = usuarios.find(
+      (usuario) => normalizar(usuario.login) === normalizar(liderEmail)
+    );
+    if (!usuarioLider) {
+      alert("O e-mail do líder precisa existir na tabela de usuários.");
+      return;
+    }
+
+    const editorInformado = Boolean(
+      editorNome || editorEmail || editorTelefone
+    );
+    if (editorInformado) {
+      if (!editorEmail) {
+        alert("Informe o e-mail do editor para validar o usuário.");
+        return;
+      }
+
+      const usuarioEditor = usuarios.find(
+        (usuario) => normalizar(usuario.login) === normalizar(editorEmail)
+      );
+      if (!usuarioEditor) {
+        alert("O e-mail do editor informado não existe na tabela de usuários.");
+        return;
+      }
+    }
+
+    const personagensEmSelecao = (novoProjeto.Elenco || [])
+      .filter((item) => item.em_selecao !== false)
+      .map((item) => item.personagem.trim())
+      .filter(Boolean);
+
+    const observacoesComMeta = salvarMetaProjetoUI("", {
+      categoria: novoProjetoCategoria.trim(),
+      lider_email: liderEmail,
+      editor_email: editorEmail,
+      selecao_configurada: true,
+      personagens_em_selecao: personagensEmSelecao,
+    });
+
     const projetoParaSalvar: Projeto = {
       ...novoProjeto,
-      Lider:
-        usuarioLogado.cargo === "lider" ||
-        usuarioLogado.cargo === "lider_treinamento"
-          ? usuarioLogado.vinculo || usuarioLogado.nome
-          : novoProjeto.Lider,
+      Projeto: nomeProjeto,
+      Tipo: novoProjeto.Tipo.trim() || "Projeto",
+      Genero: novoProjeto.Genero.trim(),
+      Prioridade: "",
+      Dupla: "",
+      Lider: liderNome,
+      Telefone_Lider: liderTelefone,
+      Editor: editorNome,
+      Telefone_Editor: editorTelefone,
+      Status: "Aguardando aprovação",
+      Data_Inicio: "",
+      Observacoes: observacoesComMeta,
     };
 
     const projetoParaSalvarComHistorico: Projeto = {
@@ -4539,13 +4686,62 @@ export default function DubworksManager() {
       projetoParaSalvarComHistorico.Elenco
     );
 
-    if (!elencoOk) alert("Projeto salvo, mas houve erro ao salvar o elenco.");
+    if (!elencoOk) {
+      alert("Projeto salvo, mas houve erro ao salvar o Banco inicial.");
+    }
+
+    let avisoAutomacao = "";
+
+    try {
+      const resultadoDrive = await criarEstruturaDriveViaFunction(
+        projetoParaSalvarComHistorico.Projeto,
+        liderEmail,
+        editorEmail,
+        projetoParaSalvarComHistorico.Tipo,
+        projetoParaSalvarComHistorico.Capa_URL
+      );
+
+      const links = {
+        pasta: resultadoDrive.pasta || "",
+        selecao: resultadoDrive.selecao || "",
+        projeto: resultadoDrive.projeto || "",
+        finalizados: resultadoDrive.finalizados || "",
+        falasTeste: resultadoDrive.falasTeste || "",
+        respostasSelecao: resultadoDrive.respostasSelecao || "",
+        cortesProjeto: resultadoDrive.cortesProjeto || "",
+        Advertencia: resultadoDrive.Advertencia || "",
+        entregasProjeto: resultadoDrive.entregasProjeto || "",
+        formSelecao: resultadoDrive.formSelecao || "",
+        formEntregas: resultadoDrive.formEntregas || "",
+        planilhaSelecao: resultadoDrive.planilhaSelecao || "",
+        planilhaEntregas: resultadoDrive.planilhaEntregas || "",
+      };
+
+      const projetoComLinks: Projeto = {
+        ...projetoParaSalvarComHistorico,
+        ID: projetoId,
+        Observacoes: salvarLinksDriveEmObservacoes(
+          projetoParaSalvarComHistorico.Observacoes,
+          links
+        ),
+      };
+
+      const linksOk = await atualizarProjetoBanco(projetoComLinks);
+      if (!linksOk) {
+        avisoAutomacao =
+          " A estrutura foi criada, mas os links não puderam ser salvos automaticamente.";
+      }
+    } catch (erro: any) {
+      console.error("Projeto criado; automação Drive/Forms falhou:", erro);
+      avisoAutomacao =
+        " Projeto criado, mas a automação de Drive/Forms precisa ser tentada novamente em Informações.";
+    }
 
     await recarregarProjetos();
     setMostrarNovoProjeto(false);
     limparFormularioProjeto();
-    setSelecionadoId(projetoId);
-    alert("Projeto salvo no banco 🚀");
+    abrirProjetoDetalhe(projetoId);
+    alert(`Projeto salvo no banco 🚀${avisoAutomacao}`);
   }
 
   function registrarHistoricoProjeto(texto: string) {
@@ -4589,10 +4785,13 @@ export default function DubworksManager() {
     try {
       setCriandoEstruturaDrive(true);
 
+      const metaProjeto = extrairMetaProjetoUI(rascunho.Observacoes);
       const resultado = await criarEstruturaDriveViaFunction(
-        `[Projeto] ${rascunho.Projeto || projetoPainel.Projeto || "Sem nome"}`,
-        rascunho.Lider || projetoPainel.Lider || "",
-        rascunho.Editor || projetoPainel.Editor || ""
+        rascunho.Projeto || projetoPainel.Projeto || "Sem nome",
+        String(metaProjeto.lider_email || ""),
+        String(metaProjeto.editor_email || ""),
+        rascunho.Tipo || projetoPainel.Tipo || "Projeto",
+        rascunho.Capa_URL || projetoPainel.Capa_URL || ""
       );
 
       if (
@@ -4840,8 +5039,17 @@ export default function DubworksManager() {
       return;
     }
 
+    const personagensEmSelecao = (rascunho.Elenco || [])
+      .filter((item) => item.em_selecao !== false)
+      .map((item) => item.personagem.trim())
+      .filter(Boolean);
+
     const projetoFinal: Projeto = {
       ...rascunho,
+      Observacoes: salvarMetaProjetoUI(rascunho.Observacoes, {
+        selecao_configurada: true,
+        personagens_em_selecao: personagensEmSelecao,
+      }),
       Lider:
         usuarioLogado.cargo === "lider" ||
         usuarioLogado.cargo === "lider_treinamento"
@@ -4887,9 +5095,18 @@ export default function DubworksManager() {
       (item) => item.personagem.trim() || item.dublador.trim()
     );
 
+    const personagensEmSelecao = elencoFiltrado
+      .filter((item) => item.em_selecao !== false)
+      .map((item) => item.personagem.trim())
+      .filter(Boolean);
+
     const projetoComElenco: Projeto = {
       ...rascunho,
       Elenco: elencoFiltrado,
+      Observacoes: salvarMetaProjetoUI(rascunho.Observacoes, {
+        selecao_configurada: true,
+        personagens_em_selecao: personagensEmSelecao,
+      }),
     };
 
     const projetoComHistorico = aplicarHistoricoAutomatico(
@@ -5095,11 +5312,15 @@ export default function DubworksManager() {
       ...anterior,
       Elenco: [
         ...anterior.Elenco,
-        { ...novoElencoProjeto, id: gerarIdTemporario() },
+        {
+          ...novoElencoProjeto,
+          id: gerarIdTemporario(),
+          em_selecao: novoElencoProjeto.em_selecao !== false,
+        },
       ],
     }));
 
-    setNovoElencoProjeto(elencoVazio);
+    setNovoElencoProjeto({ ...elencoVazio, em_selecao: true });
   }
 
   function removerElencoNovoProjeto(id: string) {
@@ -5136,7 +5357,7 @@ export default function DubworksManager() {
   function atualizarElencoRascunho(
     index: number,
     campo: keyof ElencoItem,
-    valor: string
+    valor: string | boolean
   ) {
     if (!rascunho) return;
 
@@ -5156,16 +5377,42 @@ export default function DubworksManager() {
     if (!rascunho) return;
 
     const confirmar = confirm(
-      `Retirar ${item.personagem || "este personagem"} do Banco do Projeto? O histórico das semanas anteriores será preservado quando você salvar.`
+      `Retirar ${item.personagem || "este personagem"} do Banco do Projeto? Esta ação faz soft-delete e preserva o histórico.`
     );
     if (!confirmar) return;
 
+    const idPersistido = Number(item.id);
+    if (Number.isFinite(idPersistido) && !String(item.id).startsWith("novo-")) {
+      const ok = await retirarElencoProjetoBanco(
+        rascunho.ID,
+        idPersistido,
+        `Retirado do Banco por ${usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}.`
+      );
+
+      if (!ok) {
+        alert("Não consegui retirar este personagem do Banco.");
+        return;
+      }
+    }
+
     const novoElenco = rascunho.Elenco.filter((_, i) => i !== index);
+    const metaAtual = extrairMetaProjetoUI(rascunho.Observacoes);
+    const personagensEmSelecao = novoElenco
+      .filter((elencoItem) => elencoItem.em_selecao !== false)
+      .map((elencoItem) => elencoItem.personagem.trim())
+      .filter(Boolean);
 
     setRascunho({
       ...rascunho,
       Elenco: novoElenco,
+      Observacoes: salvarMetaProjetoUI(rascunho.Observacoes, {
+        ...metaAtual,
+        selecao_configurada: true,
+        personagens_em_selecao: personagensEmSelecao,
+      }),
     });
+
+    await recarregarProjetos();
   }
 
   async function atualizarPermissaoUsuario(
@@ -6696,6 +6943,29 @@ export default function DubworksManager() {
                           alignItems: "center",
                         }}
                       >
+                        <label
+                          style={{
+                            ...botaoPrimarioStyle,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            cursor: enviandoCapaProjeto ? "wait" : "pointer",
+                          }}
+                        >
+                          {enviandoCapaProjeto ? "Enviando..." : "Enviar arquivo"}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            disabled={enviandoCapaProjeto}
+                            onChange={(e) => {
+                              const arquivo = e.target.files?.[0];
+                              if (arquivo) {
+                                void uploadCapaProjetoArquivo(arquivo, "rascunho");
+                              }
+                              e.currentTarget.value = "";
+                            }}
+                            style={{ display: "none" }}
+                          />
+                        </label>
                         <button
                           type="button"
                           style={botaoSecundarioStyle}
@@ -13198,7 +13468,7 @@ export default function DubworksManager() {
                         display: "grid",
                         gridTemplateColumns: isMobile
                           ? "1fr"
-                          : "1.1fr 1.1fr 1fr 0.9fr auto",
+                          : "1.1fr 1.1fr 1fr 0.9fr 0.7fr auto",
                         gap: 12,
                         alignItems: "end",
                         background: "rgba(2,6,23,0.48)",
@@ -13301,6 +13571,37 @@ export default function DubworksManager() {
                             {item.funcao || "-"}
                           </div>
                         )}
+                      </div>
+
+                      <div>
+                        <div style={{ color: "#94a3b8", fontSize: 12 }}>
+                          Em seleção
+                        </div>
+                        <label
+                          style={{
+                            minHeight: 42,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            color:
+                              item.em_selecao !== false ? "#86efac" : "#94a3b8",
+                            fontWeight: 800,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={item.em_selecao !== false}
+                            disabled={!podeEditarBanco}
+                            onChange={(e) =>
+                              atualizarElencoRascunho(
+                                index,
+                                "em_selecao",
+                                e.target.checked
+                              )
+                            }
+                          />
+                          {item.em_selecao !== false ? "Sim" : "Não"}
+                        </label>
                       </div>
 
                       {podeEditarBanco && (
@@ -16193,69 +16494,222 @@ export default function DubworksManager() {
                 gap: 14,
               }}
             >
-              {[
-                ["Nome do projeto", "Projeto"],
-                ["Tipo", "Tipo"],
-                ["Gênero", "Genero"],
-                ["Prioridade", "Prioridade"],
-                ["Dupla", "Dupla"],
-                ["Líder", "Lider"],
-                ["Telefone do líder", "Telefone_Lider"],
-                ["Editor", "Editor"],
-                ["Telefone do editor", "Telefone_Editor"],
-                ["Status", "Status"],
-                ["Data de início", "Data_Inicio"],
-                ["Capa do projeto (URL)", "Capa_URL"],
-              ].map(([label, campo]) => (
-                <div key={campo}>
-                  <label style={labelStyle}>{label}</label>
-                  {campo === "Status" ? (
-                    <select
-                      value={String((novoProjeto as any)[campo] || "")}
-                      onChange={(e) =>
-                        setNovoProjeto((anterior) => ({
-                          ...anterior,
-                          [campo]: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    >
-                      <option value="">Selecione o status</option>
-                      {STATUS_PROJETO_OPCOES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      value={String((novoProjeto as any)[campo] || "")}
-                      onChange={(e) =>
-                        setNovoProjeto((anterior) => ({
-                          ...anterior,
-                          [campo]: e.target.value,
-                        }))
-                      }
-                      style={inputStyle}
-                    />
-                  )}
-                </div>
-              ))}
+              <div>
+                <label style={labelStyle}>Nome do projeto</label>
+                <input
+                  value={novoProjeto.Projeto}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Projeto: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Tipo</label>
+                <select
+                  value={novoProjeto.Tipo || "Projeto"}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Tipo: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                >
+                  <option value="Projeto">Projeto</option>
+                  <option value="Parceria">Parceria</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Gênero</label>
+                <input
+                  value={novoProjeto.Genero}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Genero: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Categoria</label>
+                <input
+                  value={novoProjetoCategoria}
+                  onChange={(e) => setNovoProjetoCategoria(e.target.value)}
+                  placeholder="Ex.: Série, Filme, Curta..."
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Nome do líder *</label>
+                <input
+                  value={novoProjeto.Lider}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Lider: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Nome do editor</label>
+                <input
+                  value={novoProjeto.Editor}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Editor: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>E-mail do líder *</label>
+                <input
+                  type="email"
+                  value={novoProjetoLiderEmail}
+                  onChange={(e) => setNovoProjetoLiderEmail(e.target.value)}
+                  placeholder="Precisa existir em Usuários"
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>E-mail do editor</label>
+                <input
+                  type="email"
+                  value={novoProjetoEditorEmail}
+                  onChange={(e) => setNovoProjetoEditorEmail(e.target.value)}
+                  placeholder="Validado se informado"
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Telefone do líder *</label>
+                <input
+                  value={novoProjeto.Telefone_Lider}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Telefone_Lider: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Telefone do editor</label>
+                <input
+                  value={novoProjeto.Telefone_Editor}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Telefone_Editor: e.target.value,
+                    }))
+                  }
+                  style={inputStyle}
+                />
+              </div>
             </div>
 
-            <div>
-              <label style={labelStyle}>Observações</label>
-              <textarea
-                value={novoProjeto.Observacoes || ""}
-                onChange={(e) =>
-                  setNovoProjeto((anterior) => ({
-                    ...anterior,
-                    Observacoes: e.target.value,
-                  }))
-                }
-                style={{ ...textareaStyle, minHeight: 100 }}
-                placeholder="Observações iniciais do projeto..."
-              />
+            <div style={painelDarkStyle}>
+              <h3 style={{ ...tituloCardDarkStyle, marginBottom: 10 }}>
+                Capa do projeto
+              </h3>
+              {novoProjeto.Capa_URL ? (
+                <div
+                  style={{
+                    height: 180,
+                    borderRadius: 14,
+                    background: `url(${novoProjeto.Capa_URL}) center/cover`,
+                    border: "1px solid rgba(148,163,184,.16)",
+                    marginBottom: 10,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    height: 120,
+                    borderRadius: 14,
+                    display: "grid",
+                    placeItems: "center",
+                    color: "#64748b",
+                    border: "1px dashed rgba(148,163,184,.25)",
+                    marginBottom: 10,
+                  }}
+                >
+                  Sem capa
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr" : "1fr auto auto",
+                  gap: 10,
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  value={novoProjeto.Capa_URL}
+                  onChange={(e) =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Capa_URL: e.target.value,
+                    }))
+                  }
+                  placeholder="URL da capa"
+                  style={inputStyle}
+                />
+                <label
+                  style={{
+                    ...botaoPrimarioStyle,
+                    textAlign: "center",
+                    cursor: enviandoCapaProjeto ? "wait" : "pointer",
+                  }}
+                >
+                  {enviandoCapaProjeto ? "Enviando..." : "Upload"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={enviandoCapaProjeto}
+                    onChange={(e) => {
+                      const arquivo = e.target.files?.[0];
+                      if (arquivo) void uploadCapaProjetoArquivo(arquivo, "novo");
+                      e.currentTarget.value = "";
+                    }}
+                    style={{ display: "none" }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  style={botaoSecundarioStyle}
+                  onClick={() =>
+                    setNovoProjeto((anterior) => ({
+                      ...anterior,
+                      Capa_URL: "",
+                    }))
+                  }
+                >
+                  Remover
+                </button>
+              </div>
             </div>
 
             <div style={painelDarkStyle}>
@@ -16263,8 +16717,8 @@ export default function DubworksManager() {
                 Banco inicial de personagens
               </h3>
               <p style={{ color: "#94a3b8", margin: "0 0 14px" }}>
-                Apenas o personagem é obrigatório. Dublador, número/ID e função
-                podem ser definidos depois.
+                Personagens marcados “Em seleção” aparecem no formulário público.
+                Desmarcar não remove o personagem do Banco.
               </p>
 
               <div
@@ -16272,8 +16726,9 @@ export default function DubworksManager() {
                   display: "grid",
                   gridTemplateColumns: isMobile
                     ? "1fr"
-                    : "repeat(5, minmax(0, 1fr))",
+                    : "1.2fr 1.2fr 1fr auto auto",
                   gap: 12,
+                  alignItems: "center",
                 }}
               >
                 <input
@@ -16288,7 +16743,7 @@ export default function DubworksManager() {
                   style={inputStyle}
                 />
                 <input
-                  placeholder="Dublador (opcional)"
+                  placeholder="Nome do dublador"
                   value={novoElencoProjeto.dublador}
                   onChange={(e) =>
                     setNovoElencoProjeto((anterior) => ({
@@ -16299,7 +16754,7 @@ export default function DubworksManager() {
                   style={inputStyle}
                 />
                 <input
-                  placeholder="Número / ID (opcional)"
+                  placeholder="Telefone"
                   value={novoElencoProjeto.telefone_dublador || ""}
                   onChange={(e) =>
                     setNovoElencoProjeto((anterior) => ({
@@ -16309,18 +16764,29 @@ export default function DubworksManager() {
                   }
                   style={inputStyle}
                 />
-                <input
-                  placeholder="Função (opcional)"
-                  value={novoElencoProjeto.funcao}
-                  onChange={(e) =>
-                    setNovoElencoProjeto((anterior) => ({
-                      ...anterior,
-                      funcao: e.target.value,
-                    }))
-                  }
-                  style={inputStyle}
-                />
+                <label
+                  style={{
+                    display: "flex",
+                    gap: 7,
+                    alignItems: "center",
+                    color: "#cbd5e1",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={novoElencoProjeto.em_selecao !== false}
+                    onChange={(e) =>
+                      setNovoElencoProjeto((anterior) => ({
+                        ...anterior,
+                        em_selecao: e.target.checked,
+                      }))
+                    }
+                  />
+                  Em seleção
+                </label>
                 <button
+                  type="button"
                   onClick={adicionarElencoNovoProjeto}
                   style={botaoSecundarioStyle}
                 >
@@ -16334,9 +16800,9 @@ export default function DubworksManager() {
                     <div
                       key={item.id || index}
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 12,
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto auto",
+                        gap: 10,
                         alignItems: "center",
                         background: "rgba(2,6,23,0.54)",
                         border: "1px solid rgba(148,163,184,0.12)",
@@ -16347,12 +16813,23 @@ export default function DubworksManager() {
                       <div>
                         <strong>{item.personagem}</strong>
                         <span style={{ color: "#94a3b8" }}>
-                          {" "}
-                          — {item.dublador || "Papel aberto"}{" "}
-                          {item.funcao ? `(${item.funcao})` : ""}
+                          {" "}— {item.dublador || "Papel aberto"}
                         </span>
                       </div>
+                      <span
+                        style={{
+                          color:
+                            item.em_selecao !== false ? "#86efac" : "#94a3b8",
+                          fontSize: 12,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {item.em_selecao !== false
+                          ? "Em seleção"
+                          : "Fora da seleção"}
+                      </span>
                       <button
+                        type="button"
                         onClick={() => removerElencoNovoProjeto(item.id)}
                         style={botaoSecundarioStyle}
                       >
@@ -16362,6 +16839,17 @@ export default function DubworksManager() {
                   ))}
                 </div>
               )}
+            </div>
+
+            <div
+              style={{
+                color: "#94a3b8",
+                fontSize: 12,
+                padding: "0 2px",
+              }}
+            >
+              O status inicial será “Aguardando aprovação”. Prioridade, Dupla,
+              Data de início e Observações não são solicitados na criação.
             </div>
 
             <div
@@ -16388,6 +16876,7 @@ export default function DubworksManager() {
           </div>
         </Modal>
       )}
+
     </div>
   );
 }
