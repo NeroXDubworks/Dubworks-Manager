@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import "../mobile-first.css";
 import CortesPage from "./CortesPage";
+import ProjectEpisodesPanel from "../components/ProjectEpisodesPanel";
 
 import type {
   AvaliacaoSelecao,
@@ -142,6 +143,7 @@ import {
 } from "../services/appServices";
 
 const STATUS_PROJETO_OPCOES: string[] = [
+  "Aguardando aprovação",
   "Aguardando início",
   "Seleção",
   "Em andamento",
@@ -151,12 +153,65 @@ const STATUS_PROJETO_OPCOES: string[] = [
   "Finalizado",
 ];
 
+const META_PROJETO_INICIO = "[[PROJECT_META]]";
+const META_PROJETO_FIM = "[[/PROJECT_META]]";
+
+function extrairMetaProjetoUI(observacoes?: string) {
+  const texto = String(observacoes || "");
+  const inicio = texto.indexOf(META_PROJETO_INICIO);
+  const fim = texto.indexOf(META_PROJETO_FIM);
+  if (inicio < 0 || fim < 0 || fim <= inicio) return {} as Record<string, any>;
+
+  try {
+    const bruto = texto
+      .slice(inicio + META_PROJETO_INICIO.length, fim)
+      .trim();
+    const meta = JSON.parse(bruto);
+    return meta && typeof meta === "object"
+      ? (meta as Record<string, any>)
+      : ({} as Record<string, any>);
+  } catch {
+    return {} as Record<string, any>;
+  }
+}
+
+function observacaoPublicaProjetoUI(observacoes?: string) {
+  return String(observacoes || "")
+    .replace(/\[\[DRIVE_LINKS\]\][\s\S]*?\[\[\/DRIVE_LINKS\]\]/g, "")
+    .replace(/\[\[PROJECT_META\]\][\s\S]*?\[\[\/PROJECT_META\]\]/g, "")
+    .trim();
+}
+
+function salvarMetaProjetoUI(
+  observacoes: string | undefined,
+  patch: Record<string, any>
+) {
+  const atual = extrairMetaProjetoUI(observacoes);
+  const base = observacaoPublicaProjetoUI(observacoes);
+  const driveMatch = String(observacoes || "").match(
+    /\[\[DRIVE_LINKS\]\][\s\S]*?\[\[\/DRIVE_LINKS\]\]/
+  );
+  const meta = { ...atual, ...patch };
+  return [
+    base,
+    driveMatch?.[0] || "",
+    META_PROJETO_INICIO,
+    JSON.stringify(meta),
+    META_PROJETO_FIM,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export default function DubworksManager() {
   const [projetos, setProjetos] = useState<Projeto[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [membros, setMembros] = useState<Membro[]>([]);
   const [query, setQuery] = useState("");
   const [statusFiltro, setStatusFiltro] = useState("Todos");
+  const [generoFiltro, setGeneroFiltro] = useState("Todos");
+  const [categoriaFiltro, setCategoriaFiltro] = useState("Todas");
+  const [paginaProjetos, setPaginaProjetos] = useState(1);
   const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(null);
   const [login, setLogin] = useState("");
   const [senha, setSenha] = useState("");
@@ -226,12 +281,14 @@ export default function DubworksManager() {
   const [registroSemanalTexto, setRegistroSemanalTexto] = useState("");
   const [abaProjeto, setAbaProjeto] = useState<
     | "informacoes"
+    | "episodios"
     | "selecao"
     | "elenco"
     | "registros"
     | "drive"
     | "atividades"
     | "historico"
+    | "relatorios"
   >("informacoes");
   const [carregando, setCarregando] = useState(true);
   const [carregandoLogin, setCarregandoLogin] = useState(false);
@@ -3699,14 +3756,45 @@ export default function DubworksManager() {
     );
   }, [projetosVisiveis]);
 
+  const generosUnicos = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          projetosVisiveis
+            .map((p) => String(p.Genero || "").trim())
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [projetosVisiveis]
+  );
+
+  const categoriasUnicas = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          projetosVisiveis
+            .map((p) =>
+              String(extrairMetaProjetoUI(p.Observacoes).categoria || "").trim()
+            )
+            .filter(Boolean)
+        )
+      ).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [projetosVisiveis]
+  );
+
   const filtrados = useMemo(() => {
     return projetosVisiveis.filter((p) => {
-      const termo = query.toLowerCase();
+      const termo = query.trim().toLocaleLowerCase("pt-BR");
+      const categoria = String(
+        extrairMetaProjetoUI(p.Observacoes).categoria || ""
+      ).trim();
+
       const camposBusca = [
         p.ID,
         p.Projeto,
         p.Tipo,
         p.Genero,
+        categoria,
         p.Prioridade,
         p.Status,
         p.Lider,
@@ -3717,13 +3805,48 @@ export default function DubworksManager() {
         ),
       ]
         .join(" ")
-        .toLowerCase();
+        .toLocaleLowerCase("pt-BR");
 
-      const busca = camposBusca.indexOf(termo) !== -1;
+      const busca = !termo || camposBusca.includes(termo);
       const statusOk = statusFiltro === "Todos" || p.Status === statusFiltro;
-      return busca && statusOk;
+      const generoOk = generoFiltro === "Todos" || p.Genero === generoFiltro;
+      const categoriaOk =
+        categoriaFiltro === "Todas" || categoria === categoriaFiltro;
+
+      return busca && statusOk && generoOk && categoriaOk;
     });
-  }, [projetosVisiveis, query, statusFiltro]);
+  }, [
+    projetosVisiveis,
+    query,
+    statusFiltro,
+    generoFiltro,
+    categoriaFiltro,
+  ]);
+
+  useEffect(() => {
+    setPaginaProjetos(1);
+  }, [query, statusFiltro, generoFiltro, categoriaFiltro]);
+
+  const abrirProjetoDetalhe = (id: string) => {
+    setSelecionadoId(id);
+    setAbaProjeto("informacoes");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("projeto", id);
+      window.history.pushState({}, "", url);
+    }
+  };
+
+  const voltarAosProjetos = () => {
+    setSelecionadoId(null);
+    setRascunho(null);
+    setAbaProjeto("informacoes");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("projeto");
+      window.history.pushState({}, "", url);
+    }
+  };
 
   const selecionado = useMemo(() => {
     return projetos.find((p) => p.ID === selecionadoId) || null;
@@ -3731,6 +3854,45 @@ export default function DubworksManager() {
 
 
   const projetoPainel = selecionado || null;
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !projetos.length) return;
+    const idUrl = new URLSearchParams(window.location.search).get("projeto");
+    if (!idUrl || selecionadoId) return;
+    if (projetos.some((p) => String(p.ID) === String(idUrl))) {
+      setSelecionadoId(String(idUrl));
+    }
+  }, [projetos, selecionadoId]);
+
+  const estatisticasGeraisProjetos = useMemo(() => {
+    const total = projetosVisiveis.length;
+    const encerrados = projetosVisiveis.filter((p) => {
+      const st = normalizar(p.Status || "");
+      return st.includes("final") || st.includes("encerr");
+    }).length;
+    const emSelecao = projetosVisiveis.filter((p) =>
+      normalizar(p.Status || "").includes("sele")
+    ).length;
+    const ativos = projetosVisiveis.filter((p) => {
+      const st = normalizar(p.Status || "");
+      return !p.Arquivado && !st.includes("final") && !st.includes("encerr");
+    }).length;
+    const progresso = total
+      ? Math.round(
+          projetosVisiveis.reduce((acc, p) => {
+            const st = normalizar(p.Status || "");
+            if (st.includes("final") || st.includes("encerr")) return acc + 100;
+            if (st.includes("edi")) return acc + 85;
+            if (st.includes("andamento") || st.includes("produc")) return acc + 60;
+            if (st.includes("sele")) return acc + 35;
+            if (st.includes("aguard")) return acc + 15;
+            if (st.includes("paus") || st.includes("stand")) return acc + 50;
+            return acc + 10;
+          }, 0) / total
+        )
+      : 0;
+    return { total, ativos, emSelecao, encerrados, progresso };
+  }, [projetosVisiveis]);
 
   const estatisticasCards = useMemo(() => {
     const baseProjetos = projetoPainel ? [projetoPainel] : projetosVisiveis;
@@ -6101,82 +6263,191 @@ export default function DubworksManager() {
     </div>
   );
 
-  const ProjectList = () => (
-    <div
-      style={{
-        ...painelDarkStyle,
-        minHeight: 240,
-        overflow: "hidden",
-      }}
-    >
-      <div style={painelHeaderStyle}>
-        <h2 style={tituloCardDarkStyle}>Projetos ativos</h2>
-        <span style={{ color: "#94a3b8", fontSize: 13 }}>
-          {filtrados.length} projeto(s)
-        </span>
-      </div>
+  const ProjectList = () => {
+    const porPagina = 12;
+    const totalPaginas = Math.max(1, Math.ceil(filtrados.length / porPagina));
+    const paginaSegura = Math.min(paginaProjetos, totalPaginas);
+    const inicio = (paginaSegura - 1) * porPagina;
+    const pagina = filtrados.slice(inicio, inicio + porPagina);
 
-      {isMobile ? (
-        <div className="dw-mobile-project-list">
-          {filtrados.slice(0, 35).map((p) => {
+    return (
+      <div
+        style={{
+          ...painelDarkStyle,
+          minHeight: 240,
+          overflow: "hidden",
+        }}
+      >
+        <div style={painelHeaderStyle}>
+          <div>
+            <h2 style={tituloCardDarkStyle}>Projetos</h2>
+            <span style={{ color: "#94a3b8", fontSize: 13 }}>
+              {filtrados.length} projeto(s) • 12 por página
+            </span>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile
+              ? "1fr"
+              : isTablet
+              ? "repeat(2, minmax(0,1fr))"
+              : "repeat(4, minmax(0,1fr))",
+            gap: 14,
+            marginTop: 14,
+          }}
+        >
+          {pagina.map((p) => {
             const statusCor = corStatus(p.Status);
-            const ativo = p.ID === projetoPainel?.ID;
+            const meta = extrairMetaProjetoUI(p.Observacoes);
+            const categoria = String(meta.categoria || "").trim();
+            const resumo = observacaoPublicaProjetoUI(p.Observacoes);
+            const prioridade = String(p.Prioridade || "").trim();
+            const mostrarPrioridade =
+              prioridade &&
+              !["p0", "normal"].includes(prioridade.toLocaleLowerCase("pt-BR"));
+            const semanaAtual = numeroSemanaEntrega(p);
 
             return (
               <button
                 key={p.ID}
                 type="button"
-                className={
-                  ativo
-                    ? "dw-mobile-project-card active"
-                    : "dw-mobile-project-card"
-                }
-                onClick={() => setSelecionadoId(p.ID)}
+                onClick={() => abrirProjetoDetalhe(p.ID)}
+                style={{
+                  display: "grid",
+                  gridTemplateRows: "150px auto",
+                  padding: 0,
+                  overflow: "hidden",
+                  border: "1px solid rgba(148,163,184,.16)",
+                  borderRadius: 16,
+                  textAlign: "left",
+                  background:
+                    "linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.92))",
+                  color: "#f8fafc",
+                  cursor: "pointer",
+                  boxShadow: "0 14px 34px rgba(0,0,0,.22)",
+                  minWidth: 0,
+                }}
               >
-                <div className="dw-mobile-project-cover">
-                  {p.Capa_URL ? (
-                    <img src={p.Capa_URL} alt={p.Projeto} />
-                  ) : (
-                    <span>📁</span>
-                  )}
+                <div
+                  style={{
+                    position: "relative",
+                    background: p.Capa_URL
+                      ? `linear-gradient(rgba(2,6,23,.1),rgba(2,6,23,.45)),url(${p.Capa_URL}) center/cover`
+                      : "linear-gradient(135deg,#312e81,#0f172a)",
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 10,
+                      left: 10,
+                      background: statusCor.bg,
+                      color: statusCor.color,
+                      borderRadius: 999,
+                      padding: "5px 9px",
+                      fontWeight: 900,
+                      fontSize: 11,
+                      backdropFilter: "blur(8px)",
+                    }}
+                  >
+                    {p.Status || "Sem status"}
+                  </span>
                 </div>
 
-                <div className="dw-mobile-project-content">
-                  <div className="dw-mobile-project-title">
-                    <strong>{p.Projeto || "Projeto sem nome"}</strong>
-                    <span>#{p.ID}</span>
+                <div style={{ padding: 13, minWidth: 0 }}>
+                  <div style={{ color: "#64748b", fontSize: 11 }}>
+                    #{p.ID}
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      fontSize: 17,
+                      marginTop: 2,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.Projeto || "Projeto sem nome"}
                   </div>
 
-                  <div className="dw-mobile-project-badges">
-                    <span className="dw-chip dw-chip-blue">
-                      {p.Tipo || "-"}
-                    </span>
-                    <span className="dw-chip dw-chip-red">
-                      {p.Prioridade || "-"}
-                    </span>
-                    <span
-                      className="dw-chip"
-                      style={{
-                        background: statusCor.bg,
-                        color: statusCor.color,
-                      }}
-                    >
-                      {p.Status || "Sem status"}
-                    </span>
+                  <div
+                    style={{
+                      color: "#94a3b8",
+                      fontSize: 12,
+                      lineHeight: 1.4,
+                      minHeight: 34,
+                      marginTop: 7,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {resumo || "Sem resumo cadastrado."}
                   </div>
 
-                  <div className="dw-mobile-project-meta">
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                      marginTop: 10,
+                    }}
+                  >
+                    {[p.Tipo, p.Genero, categoria]
+                      .filter(Boolean)
+                      .map((valor) => (
+                        <span
+                          key={String(valor)}
+                          style={{
+                            borderRadius: 999,
+                            padding: "4px 7px",
+                            background: "rgba(59,130,246,.11)",
+                            border: "1px solid rgba(96,165,250,.16)",
+                            color: "#bfdbfe",
+                            fontSize: 10,
+                            fontWeight: 800,
+                          }}
+                        >
+                          {String(valor)}
+                        </span>
+                      ))}
+                    {mostrarPrioridade && (
+                      <span
+                        style={{
+                          borderRadius: 999,
+                          padding: "4px 7px",
+                          background: "rgba(244,63,94,.1)",
+                          border: "1px solid rgba(251,113,133,.18)",
+                          color: "#fda4af",
+                          fontSize: 10,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {prioridade}
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 8,
+                      marginTop: 12,
+                      color: "#cbd5e1",
+                      fontSize: 11,
+                    }}
+                  >
                     <span>
-                      <b>Gênero:</b> {p.Genero || "-"}
+                      <b>Líder:</b> {p.Lider || "—"}
                     </span>
                     <span>
-                      <b>Líder:</b> {p.Lider || "-"}
-                    </span>
-                    <span>
-                      <b>Editor:</b> {p.Editor || "-"}
-                    </span>
-                    <span>
-                      <b>Elenco:</b> {p.Elenco.length} registro(s)
+                      <b>Semana:</b> {semanaAtual || "—"}
                     </span>
                   </div>
                 </div>
@@ -6184,93 +6455,65 @@ export default function DubworksManager() {
             );
           })}
         </div>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}
+
+        {!pagina.length && (
+          <div style={{ color: "#94a3b8", padding: "24px 4px 8px" }}>
+            Nenhum projeto encontrado com esses filtros.
+          </div>
+        )}
+
+        {totalPaginas > 1 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 16,
+            }}
           >
-            <thead>
-              <tr>
-                {[
-                  "ID",
-                  "Projeto",
-                  "Tipo",
-                  "Gênero",
-                  "Prioridade",
-                  "Status",
-                  "Líder",
-                  "Editor",
-                ].map((h) => (
-                  <th key={h} style={tabelaHeaderDarkStyle}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtrados.slice(0, 35).map((p) => {
-                const statusCor = corStatus(p.Status);
-                const ativo = p.ID === projetoPainel?.ID;
-                return (
-                  <tr
-                    key={p.ID}
-                    onClick={() => setSelecionadoId(p.ID)}
-                    style={{
-                      cursor: "pointer",
-                      background: ativo
-                        ? "rgba(37,99,235,0.18)"
-                        : "transparent",
-                      borderBottom: "1px solid rgba(148,163,184,0.10)",
-                    }}
-                  >
-                    <td style={tabelaCellDarkStyle}>{p.ID}</td>
-                    <td
-                      style={{
-                        ...tabelaCellDarkStyle,
-                        fontWeight: 800,
-                        color: "#f8fafc",
-                      }}
-                    >
-                      {p.Projeto}
-                      <div
-                        style={{
-                          color: "#94a3b8",
-                          fontWeight: 500,
-                          fontSize: 12,
-                        }}
-                      >
-                        {p.Elenco.length} registro(s) de elenco
-                      </div>
-                    </td>
-                    <td style={tabelaCellDarkStyle}>{p.Tipo || "-"}</td>
-                    <td style={tabelaCellDarkStyle}>{p.Genero || "-"}</td>
-                    <td style={tabelaCellDarkStyle}>{p.Prioridade || "-"}</td>
-                    <td style={tabelaCellDarkStyle}>
-                      <span
-                        style={{
-                          background: statusCor.bg,
-                          color: statusCor.color,
-                          border: "1px solid rgba(148,163,184,0.12)",
-                          padding: "6px 10px",
-                          borderRadius: 10,
-                          fontWeight: 800,
-                          fontSize: 12,
-                        }}
-                      >
-                        {p.Status || "Sem status"}
-                      </span>
-                    </td>
-                    <td style={tabelaCellDarkStyle}>{p.Lider || "-"}</td>
-                    <td style={tabelaCellDarkStyle}>{p.Editor || "-"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+            <button
+              type="button"
+              style={botaoSecundarioStyle}
+              disabled={paginaSegura <= 1}
+              onClick={() => setPaginaProjetos((p) => Math.max(1, p - 1))}
+            >
+              ‹
+            </button>
+            {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+              .slice(
+                Math.max(0, paginaSegura - 3),
+                Math.min(totalPaginas, paginaSegura + 2)
+              )
+              .map((numero) => (
+                <button
+                  key={numero}
+                  type="button"
+                  style={
+                    numero === paginaSegura
+                      ? botaoPrimarioStyle
+                      : botaoSecundarioStyle
+                  }
+                  onClick={() => setPaginaProjetos(numero)}
+                >
+                  {numero}
+                </button>
+              ))}
+            <button
+              type="button"
+              style={botaoSecundarioStyle}
+              disabled={paginaSegura >= totalPaginas}
+              onClick={() =>
+                setPaginaProjetos((p) => Math.min(totalPaginas, p + 1))
+              }
+            >
+              ›
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const ProjectDetails = () => {
     if (!projetoPainel) {
@@ -6334,14 +6577,10 @@ export default function DubworksManager() {
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button
-                onClick={() => {
-                  setSelecionadoId(null);
-                  setRascunho(null);
-                  setAbaProjeto("informacoes");
-                }}
+                onClick={voltarAosProjetos}
                 style={botaoSecundarioStyle}
               >
-                Fechar projeto
+                ← Voltar aos projetos
               </button>
               {!rascunho || rascunho.ID !== projetoPainel.ID ? (
                 <>
@@ -12529,11 +12768,7 @@ export default function DubworksManager() {
 
           {projetoPainel && (
             <button
-              onClick={() => {
-                setSelecionadoId(null);
-                setRascunho(null);
-                setAbaProjeto("informacoes");
-              }}
+              onClick={voltarAosProjetos}
               style={{
                 ...botaoSecundarioStyle,
                 width: isMobile ? "100%" : undefined,
@@ -12560,7 +12795,7 @@ export default function DubworksManager() {
             </button>
           )}
 
-          {podeCriarProjeto(usuarioLogado) && (
+          {!projetoPainel && podeCriarProjeto(usuarioLogado) && (
             <button
               onClick={() => {
                 limparFormularioProjeto();
@@ -12617,65 +12852,76 @@ export default function DubworksManager() {
             margin: "18px auto 0",
           }}
         >
-          <MiniStat
-            icon="👥"
-            value={String(estatisticasCards.membrosElenco)}
-            label="Membros no Elenco"
-            color="#3b82f6"
-          />
-          <MiniStat
-            icon="🎙️"
-            value={String(estatisticasCards.videosTestes)}
-            label="Vídeos/Testes"
-            color="#8b5cf6"
-          />
-          <MiniStat
-            icon="🎬"
-            value={String(estatisticasCards.finalizados).padStart(2, "0")}
-            label="Episódios Finalizados"
-            color="#22c55e"
-          />
-          <MiniStat
-            icon="🕒"
-            value={String(estatisticasCards.registros).padStart(2, "0")}
-            label="Registros Semanais"
-            color="#f97316"
-          />
-          <MiniStat
-            icon="📈"
-            value={`${estatisticasCards.progresso}%`}
-            label="Progresso Geral"
-            color="#14b8a6"
-          />
+          {!projetoPainel ? (
+            <>
+              <MiniStat icon="📁" value={String(estatisticasGeraisProjetos.total)} label="Projetos no total" color="#3b82f6" />
+              <MiniStat icon="▶" value={String(estatisticasGeraisProjetos.ativos)} label="Projetos ativos" color="#22c55e" />
+              <MiniStat icon="🎭" value={String(estatisticasGeraisProjetos.emSelecao)} label="Em seleção" color="#f59e0b" />
+              <MiniStat icon="✓" value={String(estatisticasGeraisProjetos.encerrados)} label="Encerrados" color="#64748b" />
+              <MiniStat icon="📈" value={`${estatisticasGeraisProjetos.progresso}%`} label="Progresso geral" color="#8b5cf6" />
+            </>
+          ) : (
+            <>
+              <MiniStat icon="👥" value={String(estatisticasCards.membrosElenco)} label="Membros no Elenco" color="#3b82f6" />
+              <MiniStat icon="🎙️" value={String(estatisticasCards.videosTestes)} label="Vídeos/Testes" color="#8b5cf6" />
+              <MiniStat icon="🎬" value={String(estatisticasCards.finalizados).padStart(2, "0")} label="Episódios Finalizados" color="#22c55e" />
+              <MiniStat icon="🕒" value={String(estatisticasCards.registros).padStart(2, "0")} label="Registros Semanais" color="#f97316" />
+              <MiniStat icon="📈" value={`${estatisticasCards.progresso}%`} label="Progresso Geral" color="#14b8a6" />
+            </>
+          )}
         </div>
       </div>
 
-      <div
-        style={{
-          ...painelDarkStyle,
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "1fr 220px",
-          gap: 12,
-          padding: 14,
-        }}
-      >
-        <input
-          placeholder="Buscar por ID, projeto, líder, editor, gênero ou personagem..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          style={inputStyle}
-        />
-        <select
-          value={statusFiltro}
-          onChange={(e) => setStatusFiltro(e.target.value)}
-          style={inputStyle}
+      {!projetoPainel && (
+        <div
+          style={{
+            ...painelDarkStyle,
+            display: "grid",
+            gridTemplateColumns: isMobile
+              ? "1fr"
+              : "minmax(280px,1fr) repeat(3,minmax(150px,200px))",
+            gap: 12,
+            padding: 14,
+          }}
         >
-          <option>Todos</option>
-          {statusUnicos.map((status, i) => (
-            <option key={`${status}-${i}`}>{status}</option>
-          ))}
-        </select>
-      </div>
+          <input
+            placeholder="Buscar por projeto, líder, editor, gênero ou personagem..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={inputStyle}
+          />
+          <select
+            value={statusFiltro}
+            onChange={(e) => setStatusFiltro(e.target.value)}
+            style={inputStyle}
+          >
+            <option>Todos</option>
+            {statusUnicos.map((status, i) => (
+              <option key={`${status}-${i}`}>{status}</option>
+            ))}
+          </select>
+          <select
+            value={generoFiltro}
+            onChange={(e) => setGeneroFiltro(e.target.value)}
+            style={inputStyle}
+          >
+            <option>Todos</option>
+            {generosUnicos.map((genero) => (
+              <option key={genero}>{genero}</option>
+            ))}
+          </select>
+          <select
+            value={categoriaFiltro}
+            onChange={(e) => setCategoriaFiltro(e.target.value)}
+            style={inputStyle}
+          >
+            <option>Todas</option>
+            {categoriasUnicas.map((categoria) => (
+              <option key={categoria}>{categoria}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {!projetoPainel && ProjectList()}
 
@@ -12701,12 +12947,13 @@ export default function DubworksManager() {
         >
           {[
             ["informacoes", "ⓘ Informações"],
+            ["episodios", "🎬 Episódios"],
             ["selecao", "🎭 Seleção"],
-            ["elenco", "🎭 Banco & Semanas"],
-            ["registros", "▣ Registros Semanais"],
-            ["drive", "📁 Arquivos do Drive"],
-            ["atividades", "↔ Atividades"],
+            ["elenco", "🎙️ Banco & Semanas"],
+            ["registros", "▣ Registro"],
+            ["atividades", "↔ Atividade"],
             ["historico", "◷ Histórico"],
+            ["relatorios", "📊 Relatórios"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -12765,6 +13012,14 @@ export default function DubworksManager() {
           </div>
           {DrivePanel()}
         </div>
+      )}
+
+      {abaProjeto === "episodios" && projetoPainel && (
+        <ProjectEpisodesPanel
+          projeto={projetoPainel}
+          usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
+          podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
+        />
       )}
 
       {abaProjeto === "selecao" &&
@@ -13730,6 +13985,46 @@ export default function DubworksManager() {
         </div>
       )}
 
+      {abaProjeto === "relatorios" && projetoPainel && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile
+              ? "1fr"
+              : "repeat(3,minmax(0,1fr))",
+            gap: 14,
+          }}
+        >
+          <div style={painelDarkStyle}>
+            <div style={{ color: "#94a3b8", fontSize: 12 }}>Entregas cadastradas</div>
+            <div style={{ color: "#f8fafc", fontSize: 30, fontWeight: 900 }}>
+              {entregasProducao.length}
+            </div>
+          </div>
+          <div style={painelDarkStyle}>
+            <div style={{ color: "#94a3b8", fontSize: 12 }}>Aprovadas</div>
+            <div style={{ color: "#86efac", fontSize: 30, fontWeight: 900 }}>
+              {entregasProducao.filter((item) => item.status === "aprovado").length}
+            </div>
+          </div>
+          <div style={painelDarkStyle}>
+            <div style={{ color: "#94a3b8", fontSize: 12 }}>Regravações</div>
+            <div style={{ color: "#fda4af", fontSize: 30, fontWeight: 900 }}>
+              {entregasProducao.filter((item) => item.status === "regravacao").length}
+            </div>
+          </div>
+          <div style={{ ...painelDarkStyle, gridColumn: isMobile ? undefined : "1 / -1" }}>
+            <h2 style={tituloCardDarkStyle}>Relatório automático</h2>
+            <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+              A visão detalhada por episódio (previstos, entregaram, pendentes,
+              aguardando análise, aprovados e regravações) fica na aba Episódios.
+              Este painel mantém o consolidado do projeto sem recriar o antigo
+              painel global de Atenção/Regravações.
+            </p>
+          </div>
+        </div>
+      )}
+
       {abaProjeto === "historico" &&
         (projetoPainel ? (
           <div style={painelDarkStyle}>
@@ -13775,7 +14070,6 @@ export default function DubworksManager() {
           </div>
         ))}
 
-      {projetoPainel && ProjectList()}
 
     </div>
   );
