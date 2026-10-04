@@ -126,13 +126,19 @@ function extrairMetaProjetoObservacoes(observacoes?: string) {
 }
 
 async function carregarDadosFormularioProjeto(projectName: string): Promise<{
-  elenco: ElencoForm[];
+  elencoCompleto: ElencoForm[];
+  elencoSelecao: ElencoForm[];
   capaUrl: string;
   projectType: string;
 }> {
   const nome = limparNomeProjeto(projectName);
   if (!nome || nome.toLocaleLowerCase("pt-BR") === "sem nome") {
-    return { elenco: [], capaUrl: "", projectType: "Projeto" };
+    return {
+      elencoCompleto: [],
+      elencoSelecao: [],
+      capaUrl: "",
+      projectType: "Projeto",
+    };
   }
 
   // Alguns projetos legados possuem espaços ao final do nome. Buscamos
@@ -169,7 +175,8 @@ async function carregarDadosFormularioProjeto(projectName: string): Promise<{
 
   if (erroElenco) {
     return {
-      elenco: [],
+      elencoCompleto: [],
+      elencoSelecao: [],
       capaUrl: String(projeto.capa_url || "").trim(),
       projectType: String(projeto.tipo || "Projeto").trim() || "Projeto",
     };
@@ -190,7 +197,7 @@ async function carregarDadosFormularioProjeto(projectName: string): Promise<{
 
   const vistos = new Set<string>();
 
-  const elencoFiltrado = (elenco || [])
+  const elencoCompleto = (elenco || [])
     .map((item: any) => ({
       personagem: String(item.personagem || "").trim(),
       dublador: String(item.dublador || "").trim(),
@@ -200,13 +207,18 @@ async function carregarDadosFormularioProjeto(projectName: string): Promise<{
     .filter((item) => {
       const chave = item.personagem.toLocaleLowerCase("pt-BR");
       if (!chave || vistos.has(chave)) return false;
-      if (selecaoConfigurada && !personagensEmSelecao.has(chave)) return false;
       vistos.add(chave);
       return true;
     });
 
+  const elencoSelecao = elencoCompleto.filter((item) => {
+    const chave = item.personagem.toLocaleLowerCase("pt-BR");
+    return !selecaoConfigurada || personagensEmSelecao.has(chave);
+  });
+
   return {
-    elenco: elencoFiltrado,
+    elencoCompleto,
+    elencoSelecao,
     capaUrl: String(projeto.capa_url || "").trim(),
     projectType: String(projeto.tipo || "Projeto").trim() || "Projeto",
   };
@@ -359,10 +371,15 @@ function instalarBootstrapV2() {
       const dadosProjeto = await carregarDadosFormularioProjeto(
         payload.projectName
       );
-      const elenco = dadosProjeto.elenco;
-      const personagens = elenco.map((item) => item.personagem);
+      const elenco = dadosProjeto.elencoCompleto;
+      const personagensSelecao = dadosProjeto.elencoSelecao.map(
+        (item) => item.personagem
+      );
+      const personagensEntregas = dadosProjeto.elencoCompleto.map(
+        (item) => item.personagem
+      );
 
-      if (!personagens.length) {
+      if (!personagensSelecao.length) {
         throw new Error(
           `Não encontrei personagens marcados como Em seleção para ${limparNomeProjeto(
             payload.projectName
@@ -380,7 +397,9 @@ function instalarBootstrapV2() {
           projectName: payload.projectName,
           respostasSelecaoFolderId,
           entregasFolderId,
-          personagens,
+          personagens: personagensSelecao,
+          personagensSelecao,
+          personagensEntregas,
           elenco,
           capaUrl: String(payload.capaUrl || dadosProjeto.capaUrl || "").trim(),
           projectType: String(
