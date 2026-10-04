@@ -121,11 +121,19 @@ export default async function handler(req, res) {
     ).trim();
     const entregasFolderId = String(body?.entregasFolderId || "").trim();
     const elenco = normalizarElenco(body?.elenco);
-    const personagens = normalizarPersonagens(
-      Array.isArray(body?.personagens)
+    const personagensSelecao = normalizarPersonagens(
+      Array.isArray(body?.personagensSelecao)
+        ? body.personagensSelecao
+        : Array.isArray(body?.personagens)
         ? body.personagens
         : elenco.map((item) => item.personagem)
     );
+    const personagensEntregas = normalizarPersonagens(
+      Array.isArray(body?.personagensEntregas)
+        ? body.personagensEntregas
+        : elenco.map((item) => item.personagem)
+    );
+    const personagens = personagensSelecao;
 
     if (!projectName || !respostasSelecaoFolderId || !entregasFolderId) {
       return responder(res, 400, {
@@ -178,9 +186,12 @@ export default async function handler(req, res) {
           existingSelectionFormId,
           existingDeliveriesFormId,
           episodios,
-          personagens,
-          characters: personagens,
-          selectionCharacters: personagens,
+          personagens: personagensSelecao,
+          personagensSelecao,
+          personagensEntregas,
+          characters: personagensSelecao,
+          selectionCharacters: personagensSelecao,
+          deliveryCharacters: personagensEntregas,
           elenco,
           capaUrl,
           coverUrl: capaUrl,
@@ -236,8 +247,9 @@ export default async function handler(req, res) {
 
     return responder(res, 200, {
       ...data,
-      personagensEnviados: personagens,
-      totalPersonagensEnviados: personagens.length,
+      personagensEnviados: personagensSelecao,
+      personagensEntregasEnviados: personagensEntregas,
+      totalPersonagensEnviados: personagensSelecao.length,
     });
   } catch (erro) {
     console.error("Erro no proxy de formulários:", erro);
