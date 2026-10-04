@@ -3,6 +3,7 @@ export const config = {
 };
 
 const FORMS_COPIER_URL =
+  process.env.GOOGLE_PROJECT_FORMS_SCRIPT_URL ||
   "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
 
 const SUPABASE_URL = "https://omgjbafqukpzdhhpdlaa.supabase.co";
@@ -144,6 +145,16 @@ export default async function handler(req, res) {
 
     const capaUrl = String(body?.capaUrl || "").trim();
     const projectType = String(body?.projectType || "Projeto").trim() || "Projeto";
+    const projectId = String(body?.projectId || "").trim();
+    const existingSelectionFormId = String(
+      body?.existingSelectionFormId || body?.formSelecaoId || body?.formSelecao || ""
+    ).trim();
+    const existingDeliveriesFormId = String(
+      body?.existingDeliveriesFormId || body?.formEntregasId || body?.formEntregas || ""
+    ).trim();
+    const episodios = Array.isArray(body?.episodios)
+      ? body.episodios.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 270000);
@@ -159,10 +170,14 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           action: "preparar_formularios_projeto",
           access_token: accessToken,
+          projectId,
           projectName,
           projetoNome: projectName,
           respostasSelecaoFolderId,
           entregasFolderId,
+          existingSelectionFormId,
+          existingDeliveriesFormId,
+          episodios,
           personagens,
           characters: personagens,
           selectionCharacters: personagens,
