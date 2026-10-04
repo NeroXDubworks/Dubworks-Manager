@@ -2288,6 +2288,7 @@ export async function salvarEntregasProducaoBanco(
 
   const payload = entregas.map((item) => ({
     projeto_id: Number(projetoId),
+    episodio_id: item.episodio_id ?? null,
     resposta_id: item.resposta_id,
     linha: item.linha ?? null,
     personagem: item.personagem,
