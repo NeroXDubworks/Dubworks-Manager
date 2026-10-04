@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { ElencoItem, Projeto } from "../types";
-import { enfileirarLembreteWhatsapp } from "../services/appServices";
+import {
+  enfileirarLembreteWhatsapp,
+  extrairGoogleFolderId,
+  extrairLinksDrive,
+} from "../services/appServices";
 import {
   adicionarElencoAoEpisodio,
   abrirSelecaoEmergencial,
@@ -10,6 +14,7 @@ import {
   carregarHistoricoEpisodio,
   carregarVagasEpisodio,
   criarEpisodioProjeto,
+  criarEstruturaDriveEpisodio,
   finalizarEpisodioProjeto,
   reabrirEpisodioProjeto,
   removerElencoDoEpisodio,
@@ -241,7 +246,7 @@ export default function ProjectEpisodesPanel({
     try {
       const numero =
         episodios.reduce((maior, item) => Math.max(maior, item.numero), 0) + 1;
-      const criado = await criarEpisodioProjeto({
+      let criado = await criarEpisodioProjeto({
         projetoId: projeto.ID,
         numero,
         titulo: novo.titulo,
@@ -249,6 +254,36 @@ export default function ProjectEpisodesPanel({
         prazoEm: novo.prazo || undefined,
         criadoPor: usuarioNome,
       });
+
+      try {
+        const links = extrairLinksDrive(projeto.Observacoes || "");
+        const projectFolderId = extrairGoogleFolderId(links.projeto || "");
+        const finalizadosFolderId = extrairGoogleFolderId(
+          links.finalizados || ""
+        );
+
+        if (projectFolderId && finalizadosFolderId) {
+          const drive = await criarEstruturaDriveEpisodio({
+            projectFolderId,
+            finalizadosFolderId,
+            numero,
+            titulo: novo.titulo,
+          });
+
+          criado = await atualizarEpisodioProjeto(criado.id, {
+            pasta_drive_id: drive.episodioId,
+            pasta_cortes_id: drive.cortesId,
+            pasta_entregas_id: drive.entregasId,
+            pasta_finalizado_id: drive.finalizadoId,
+          });
+        }
+      } catch (erro) {
+        console.warn(
+          "Episódio criado, mas as pastas do Drive não puderam ser criadas:",
+          erro
+        );
+      }
+
       setNovo({ titulo: "", descricao: "", prazo: "" });
       setMostrarNovo(false);
       await recarregarEpisodios(criado.id);
