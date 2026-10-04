@@ -4791,7 +4791,8 @@ export default function DubworksManager() {
         String(metaProjeto.lider_email || ""),
         String(metaProjeto.editor_email || ""),
         rascunho.Tipo || projetoPainel.Tipo || "Projeto",
-        rascunho.Capa_URL || projetoPainel.Capa_URL || ""
+        rascunho.Capa_URL || projetoPainel.Capa_URL || "",
+        extrairGoogleFolderId(linksAtuais.pasta || "")
       );
 
       if (
