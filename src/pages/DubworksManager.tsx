@@ -7005,7 +7005,11 @@ export default function DubworksManager() {
             const mostrarPrioridade =
               prioridade &&
               !["p0", "normal"].includes(prioridade.toLocaleLowerCase("pt-BR"));
-            const semanaAtual = numeroSemanaEntrega(p);
+            const semanaAtual = (p.Elenco || []).reduce(
+              (maior, item) =>
+                Math.max(maior, numeroSemanaEntrega(item.semana_atual)),
+              0
+            );
 
             return (
               <button
