@@ -79,6 +79,45 @@ function projetoNumero(projetoId: string | number) {
   return numero;
 }
 
+export async function criarEstruturaDriveEpisodio(params: {
+  projectFolderId: string;
+  finalizadosFolderId: string;
+  numero: number;
+  titulo?: string;
+}) {
+  const { data, error } = await supabase.functions.invoke(
+    "google-drive-create-structure",
+    {
+      body: {
+        action: "criar_estrutura_episodio",
+        projectFolderId: params.projectFolderId,
+        finalizadosFolderId: params.finalizadosFolderId,
+        numero: params.numero,
+        titulo: params.titulo || "",
+      },
+    }
+  );
+
+  if (error) throw error;
+  if (!data || data.error || data.ok === false) {
+    throw new Error(
+      String(data?.error || data?.message || "Falha ao criar pastas do episódio.")
+    );
+  }
+
+  return data as {
+    ok: true;
+    episodioId: string;
+    episodio: string;
+    cortesId: string;
+    cortes: string;
+    entregasId: string;
+    entregas: string;
+    finalizadoId: string;
+    finalizado: string;
+  };
+}
+
 export async function carregarEpisodiosProjeto(
   projetoId: string | number
 ): Promise<ProjetoEpisodio[]> {
