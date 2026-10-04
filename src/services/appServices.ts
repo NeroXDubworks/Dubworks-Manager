@@ -1891,7 +1891,8 @@ export async function criarEstruturaDriveViaFunction(
   leaderEmail = "",
   editorEmail = "",
   projectType = "Projeto",
-  capaUrl = ""
+  capaUrl = "",
+  existingFolderId = ""
 ): Promise<DriveStructureResult> {
   const response = await fetch(
     "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure",
@@ -1908,6 +1909,7 @@ export async function criarEstruturaDriveViaFunction(
         leaderEmail,
         editorEmail,
         capaUrl,
+        existingFolderId,
         folders: ["1 | Seleção", "2 | Projeto", "3 | Finalizado"],
       }),
     }
