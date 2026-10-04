@@ -26,7 +26,7 @@ function extrairFolderId(urlOuId?: string) {
 
 function limparNomeProjeto(projectName?: string) {
   return String(projectName || "")
-    .replace(/^\s*\[Projeto\]\s*/i, "")
+    .replace(/^\s*\[(Projeto|Parceria)\]\s*/i, "")
     .trim();
 }
 
@@ -106,19 +106,59 @@ function extrairProjetoIdDaUrl(url: string) {
   }
 }
 
-async function carregarElencoProjeto(projectName: string): Promise<ElencoForm[]> {
+function extrairMetaProjetoObservacoes(observacoes?: string) {
+  const texto = String(observacoes || "");
+  const inicio = texto.indexOf("[[PROJECT_META]]");
+  const fim = texto.indexOf("[[/PROJECT_META]]");
+  if (inicio < 0 || fim < 0 || fim <= inicio) return {} as Record<string, any>;
+
+  try {
+    const bruto = texto
+      .slice(inicio + "[[PROJECT_META]]".length, fim)
+      .trim();
+    const meta = JSON.parse(bruto);
+    return meta && typeof meta === "object"
+      ? (meta as Record<string, any>)
+      : ({} as Record<string, any>);
+  } catch {
+    return {} as Record<string, any>;
+  }
+}
+
+async function carregarDadosFormularioProjeto(projectName: string): Promise<{
+  elenco: ElencoForm[];
+  capaUrl: string;
+  projectType: string;
+}> {
   const nome = limparNomeProjeto(projectName);
-  if (!nome || nome.toLocaleLowerCase("pt-BR") === "sem nome") return [];
+  if (!nome || nome.toLocaleLowerCase("pt-BR") === "sem nome") {
+    return { elenco: [], capaUrl: "", projectType: "Projeto" };
+  }
 
-  const { data: projeto, error: erroProjeto } = await supabase
+  // Alguns projetos legados possuem espaços ao final do nome. Buscamos
+  // candidatos por prefixo e confirmamos por trim no cliente para não falhar
+  // nesses registros sem correr o risco de usar outro projeto parecido.
+  const { data: candidatos, error: erroProjeto } = await supabase
     .from("projetos")
-    .select("id,projeto")
-    .eq("projeto", nome)
+    .select("id,projeto,observacoes,capa_url,tipo")
+    .ilike("projeto", `${nome}%`)
     .order("id", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(20);
 
-  if (erroProjeto || !projeto?.id) return [];
+  if (erroProjeto) {
+    return { elenco: [], capaUrl: "", projectType: "Projeto" };
+  }
+
+  const projeto =
+    (candidatos || []).find(
+      (item: any) =>
+        limparNomeProjeto(String(item.projeto || "")).toLocaleLowerCase("pt-BR") ===
+        nome.toLocaleLowerCase("pt-BR")
+    ) || null;
+
+  if (!projeto?.id) {
+    return { elenco: [], capaUrl: "", projectType: "Projeto" };
+  }
 
   const { data: elenco, error: erroElenco } = await supabase
     .from("elenco")
@@ -127,11 +167,30 @@ async function carregarElencoProjeto(projectName: string): Promise<ElencoForm[]>
     .eq("ativo", true)
     .order("id", { ascending: true });
 
-  if (erroElenco) return [];
+  if (erroElenco) {
+    return {
+      elenco: [],
+      capaUrl: String(projeto.capa_url || "").trim(),
+      projectType: String(projeto.tipo || "Projeto").trim() || "Projeto",
+    };
+  }
+
+  const meta = extrairMetaProjetoObservacoes(projeto.observacoes);
+  const selecaoConfigurada = meta.selecao_configurada === true;
+  const personagensEmSelecao = new Set(
+    (Array.isArray(meta.personagens_em_selecao)
+      ? meta.personagens_em_selecao
+      : []
+    )
+      .map((item: any) =>
+        String(item || "").trim().toLocaleLowerCase("pt-BR")
+      )
+      .filter(Boolean)
+  );
 
   const vistos = new Set<string>();
 
-  return (elenco || [])
+  const elencoFiltrado = (elenco || [])
     .map((item: any) => ({
       personagem: String(item.personagem || "").trim(),
       dublador: String(item.dublador || "").trim(),
@@ -141,9 +200,16 @@ async function carregarElencoProjeto(projectName: string): Promise<ElencoForm[]>
     .filter((item) => {
       const chave = item.personagem.toLocaleLowerCase("pt-BR");
       if (!chave || vistos.has(chave)) return false;
+      if (selecaoConfigurada && !personagensEmSelecao.has(chave)) return false;
       vistos.add(chave);
       return true;
     });
+
+  return {
+    elenco: elencoFiltrado,
+    capaUrl: String(projeto.capa_url || "").trim(),
+    projectType: String(projeto.tipo || "Projeto").trim() || "Projeto",
+  };
 }
 
 function mapearRetornoFormularios(data: any) {
@@ -290,8 +356,19 @@ function instalarBootstrapV2() {
       const accessToken = session?.access_token || "";
       if (!accessToken) throw new Error("Sessão expirada antes da criação dos formulários. Entre novamente no Manager.");
 
-      const elenco = await carregarElencoProjeto(payload.projectName);
+      const dadosProjeto = await carregarDadosFormularioProjeto(
+        payload.projectName
+      );
+      const elenco = dadosProjeto.elenco;
       const personagens = elenco.map((item) => item.personagem);
+
+      if (!personagens.length) {
+        throw new Error(
+          `Não encontrei personagens marcados como Em seleção para ${limparNomeProjeto(
+            payload.projectName
+          )}. O formulário não será criado com “A definir”.`
+        );
+      }
 
       const respostaForms = await fetchOriginal(FORMS_PROXY_URL, {
         method: "POST",
@@ -305,6 +382,10 @@ function instalarBootstrapV2() {
           entregasFolderId,
           personagens,
           elenco,
+          capaUrl: String(payload.capaUrl || dadosProjeto.capaUrl || "").trim(),
+          projectType: String(
+            payload.projectType || dadosProjeto.projectType || "Projeto"
+          ).trim(),
         }),
       });
 
