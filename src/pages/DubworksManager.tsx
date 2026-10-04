@@ -5925,6 +5925,288 @@ export default function DubworksManager() {
     setMenuMobileAberto(false);
   }
 
+  async function exportarRelatorioProjetosCSV() {
+    const projetosAtivos = projetosVisiveis.filter((projeto) => {
+      if (projeto.Arquivado) return false;
+      const status = normalizar(projeto.Status || "");
+      return !status.includes("final") && !status.includes("encerr");
+    });
+
+    if (!projetosAtivos.length) {
+      alert("Não há projetos ativos para exportar.");
+      return;
+    }
+
+    const ids = projetosAtivos
+      .map((projeto) => Number(projeto.ID))
+      .filter((id) => Number.isFinite(id));
+
+    try {
+      const [
+        episodiosResp,
+        elencoEpisodiosResp,
+        semanasResp,
+        participantesSemanasResp,
+        entregasResp,
+      ] = await Promise.all([
+        supabase
+          .from("projeto_episodios")
+          .select("id,projeto_id,numero,titulo,status")
+          .in("projeto_id", ids)
+          .order("numero", { ascending: true }),
+        supabase
+          .from("episodio_elenco")
+          .select("episodio_id,projeto_id,personagem,dublador")
+          .in("projeto_id", ids),
+        supabase
+          .from("projeto_semanas")
+          .select("id,projeto_id,semana,status")
+          .in("projeto_id", ids)
+          .order("semana", { ascending: true }),
+        supabase
+          .from("projeto_semana_elenco")
+          .select(
+            "projeto_semana_id,personagem_snapshot,dublador_snapshot,elenco_id"
+          ),
+        supabase
+          .from("entregas_producao")
+          .select(
+            "projeto_id,episodio_id,personagem,dublador,semana,status"
+          )
+          .in("projeto_id", ids),
+      ]);
+
+      const erros = [
+        episodiosResp.error,
+        elencoEpisodiosResp.error,
+        semanasResp.error,
+        participantesSemanasResp.error,
+        entregasResp.error,
+      ].filter(Boolean);
+
+      if (erros.length) {
+        const erroReal = erros.find((erro: any) => erro?.code !== "42P01");
+        if (erroReal) throw erroReal;
+      }
+
+      const episodios = episodiosResp.data || [];
+      const elencoEpisodios = elencoEpisodiosResp.data || [];
+      const semanas = semanasResp.data || [];
+      const participantesSemanas = participantesSemanasResp.data || [];
+      const entregas = entregasResp.data || [];
+
+      const chavePersonagem = (valor: any) =>
+        normalizar(String(valor || "").trim());
+
+      const contarSituacao = (
+        previstosLista: Array<{ personagem?: string | null }>,
+        enviosLista: Array<{ personagem?: string | null; status?: string | null }>
+      ) => {
+        const previstos = new Set(
+          previstosLista
+            .map((item) => chavePersonagem(item.personagem))
+            .filter(Boolean)
+        );
+        const entregaram = new Set(
+          enviosLista
+            .map((item) => chavePersonagem(item.personagem))
+            .filter(Boolean)
+        );
+        const aguardando = new Set(
+          enviosLista
+            .filter((item) => String(item.status || "") === "pendente")
+            .map((item) => chavePersonagem(item.personagem))
+            .filter(Boolean)
+        );
+        const aprovados = new Set(
+          enviosLista
+            .filter((item) => String(item.status || "") === "aprovado")
+            .map((item) => chavePersonagem(item.personagem))
+            .filter(Boolean)
+        );
+        const regravacoes = new Set(
+          enviosLista
+            .filter((item) => String(item.status || "") === "regravacao")
+            .map((item) => chavePersonagem(item.personagem))
+            .filter(Boolean)
+        );
+
+        const totalPrevistos = previstos.size;
+        const totalEntregaram = entregaram.size;
+
+        return {
+          previstos: totalPrevistos,
+          entregaram: totalEntregaram,
+          naoEntregaram: Math.max(0, totalPrevistos - totalEntregaram),
+          aguardando: aguardando.size,
+          aprovados: aprovados.size,
+          regravacoes: regravacoes.size,
+          recebimento: totalPrevistos
+            ? Math.round((totalEntregaram / totalPrevistos) * 100)
+            : 0,
+          aprovacao: totalPrevistos
+            ? Math.round((aprovados.size / totalPrevistos) * 100)
+            : 0,
+        };
+      };
+
+      const cabecalhos = [
+        "ID_Projeto",
+        "Projeto",
+        "Status_Projeto",
+        "Dimensao",
+        "Episodio",
+        "Semana",
+        "Status_Ciclo",
+        "Previstos",
+        "Entregaram",
+        "Nao_Entregaram",
+        "Aguardando_Analise",
+        "Aprovados",
+        "Regravacoes",
+        "Progresso_Recebimento",
+        "Progresso_Aprovacao",
+      ];
+
+      const linhas: string[] = [];
+
+      projetosAtivos.forEach((projeto) => {
+        const projetoId = Number(projeto.ID);
+        const episodiosProjeto = episodios.filter(
+          (item: any) => Number(item.projeto_id) === projetoId
+        );
+
+        episodiosProjeto.forEach((episodio: any) => {
+          const elencoDoEpisodio = elencoEpisodios.filter(
+            (item: any) => Number(item.episodio_id) === Number(episodio.id)
+          );
+          const entregasDoEpisodio = entregas.filter(
+            (item: any) => Number(item.episodio_id) === Number(episodio.id)
+          );
+          const resumo = contarSituacao(
+            elencoDoEpisodio,
+            entregasDoEpisodio
+          );
+
+          linhas.push(
+            [
+              projeto.ID,
+              projeto.Projeto,
+              projeto.Status,
+              "Episodio",
+              `EP ${String(episodio.numero || 0).padStart(2, "0")} - ${
+                episodio.titulo || "Sem título"
+              }`,
+              "",
+              episodio.status || "",
+              String(resumo.previstos),
+              String(resumo.entregaram),
+              String(resumo.naoEntregaram),
+              String(resumo.aguardando),
+              String(resumo.aprovados),
+              String(resumo.regravacoes),
+              `${resumo.recebimento}%`,
+              `${resumo.aprovacao}%`,
+            ]
+              .map(escaparCSV)
+              .join(";")
+          );
+        });
+
+        const semanasProjetoAtual = semanas.filter(
+          (item: any) => Number(item.projeto_id) === projetoId
+        );
+
+        semanasProjetoAtual.forEach((semana: any) => {
+          const participantes = participantesSemanas
+            .filter(
+              (item: any) =>
+                Number(item.projeto_semana_id) === Number(semana.id)
+            )
+            .map((item: any) => ({
+              personagem: item.personagem_snapshot || "",
+            }));
+
+          const entregasSemana = entregas.filter(
+            (item: any) =>
+              Number(item.projeto_id) === projetoId &&
+              !item.episodio_id &&
+              numeroSemanaEntrega(item.semana) === Number(semana.semana)
+          );
+          const resumo = contarSituacao(participantes, entregasSemana);
+
+          linhas.push(
+            [
+              projeto.ID,
+              projeto.Projeto,
+              projeto.Status,
+              "Semana",
+              "",
+              `Semana ${String(semana.semana || 0).padStart(2, "0")}`,
+              semana.status || "",
+              String(resumo.previstos),
+              String(resumo.entregaram),
+              String(resumo.naoEntregaram),
+              String(resumo.aguardando),
+              String(resumo.aprovados),
+              String(resumo.regravacoes),
+              `${resumo.recebimento}%`,
+              `${resumo.aprovacao}%`,
+            ]
+              .map(escaparCSV)
+              .join(";")
+          );
+        });
+
+        if (!episodiosProjeto.length && !semanasProjetoAtual.length) {
+          linhas.push(
+            [
+              projeto.ID,
+              projeto.Projeto,
+              projeto.Status,
+              "Projeto",
+              "",
+              "",
+              "",
+              "0",
+              "0",
+              "0",
+              "0",
+              "0",
+              "0",
+              "0%",
+              "0%",
+            ]
+              .map(escaparCSV)
+              .join(";")
+          );
+        }
+      });
+
+      const conteudo =
+        "\uFEFF" + [cabecalhos.join(";"), ...linhas].join("\n");
+      const blob = new Blob([conteudo], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `relatorio_projetos_dubworks_${new Date()
+        .toISOString()
+        .slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (erro: any) {
+      console.error("Erro ao exportar relatório dos projetos:", erro);
+      alert(
+        erro?.message ||
+          "Não foi possível montar o relatório dos projetos ativos."
+      );
+    }
+  }
+
   function exportarProjetosCSV() {
     const cabecalhos = [
       "ID",
@@ -9049,8 +9331,14 @@ export default function DubworksManager() {
           gap: 16,
         }}
       >
+        <button
+          onClick={exportarRelatorioProjetosCSV}
+          style={reportCardDarkStyle}
+        >
+          📊 Exportar Relatório dos Projetos
+        </button>
         <button onClick={exportarProjetosCSV} style={reportCardDarkStyle}>
-          📌 Exportar Projetos
+          📌 Exportar Cadastro de Projetos
         </button>
         <button onClick={exportarElencoCSV} style={reportCardDarkStyle}>
           🎙️ Exportar Elenco
