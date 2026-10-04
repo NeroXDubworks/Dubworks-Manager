@@ -152,7 +152,12 @@ async function carregarDadosFormularioProjeto(projectName: string): Promise<{
     .limit(20);
 
   if (erroProjeto) {
-    return { elenco: [], capaUrl: "", projectType: "Projeto" };
+    return {
+      elencoCompleto: [],
+      elencoSelecao: [],
+      capaUrl: "",
+      projectType: "Projeto",
+    };
   }
 
   const projeto =
@@ -163,7 +168,12 @@ async function carregarDadosFormularioProjeto(projectName: string): Promise<{
     ) || null;
 
   if (!projeto?.id) {
-    return { elenco: [], capaUrl: "", projectType: "Projeto" };
+    return {
+      elencoCompleto: [],
+      elencoSelecao: [],
+      capaUrl: "",
+      projectType: "Projeto",
+    };
   }
 
   const { data: elenco, error: erroElenco } = await supabase
