@@ -24,6 +24,23 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
 
+    if (body?.action === "criar_estrutura_episodio") {
+      const GOOGLE_CLIENT_EMAIL = Deno.env.get("GOOGLE_CLIENT_EMAIL");
+      const GOOGLE_PRIVATE_KEY = Deno.env.get("GOOGLE_PRIVATE_KEY");
+
+      if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
+        return json(
+          { error: "Secrets do Google Drive não configurados." },
+          500
+        );
+      }
+
+      const jwt = await createJWT(GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY);
+      const accessToken = await getAccessToken(jwt);
+      const resultado = await criarEstruturaEpisodio(body, accessToken);
+      return json(resultado, 200);
+    }
+
     // Mantém a compatibilidade de leitura das respostas. Esta integração usa
     // exclusivamente o Apps Script de Projetos/Drive/Forms, nunca o de Advertências.
     if (body?.action) {
@@ -422,6 +439,72 @@ async function darPermissaoMelhorEsforco(
   } catch (err) {
     console.warn("Falha ao compartilhar pasta:", err);
   }
+}
+
+async function criarEstruturaEpisodio(body: any, accessToken: string) {
+  const projectFolderId = extrairId(
+    body?.projectFolderId || body?.projetoFolderId
+  );
+  const finalizadosFolderId = extrairId(
+    body?.finalizadosFolderId || body?.finalFolderId
+  );
+  const numero = Number(body?.numero || body?.episodio || 0);
+  const titulo = String(body?.titulo || "").trim();
+
+  if (!projectFolderId) {
+    throw new Error("Pasta 2 | Projeto não informada para o episódio.");
+  }
+  if (!finalizadosFolderId) {
+    throw new Error("Pasta 3 | Finalizado não informada para o episódio.");
+  }
+  if (!Number.isFinite(numero) || numero <= 0) {
+    throw new Error("Número do episódio inválido.");
+  }
+
+  const numeroTexto = String(numero).padStart(2, "0");
+  const nomeBase = `Episódio ${numeroTexto}${
+    titulo ? " - " + titulo : ""
+  }`;
+
+  const episodio = await obterOuCriarPasta(
+    [nomeBase, `Episódio ${numeroTexto}`, `EP ${numeroTexto}`],
+    projectFolderId,
+    accessToken,
+    nomeBase
+  );
+
+  const cortes = await obterOuCriarPasta(
+    ["Cortes", "Cortes do Episódio"],
+    episodio.id,
+    accessToken,
+    "Cortes"
+  );
+
+  const entregas = await obterOuCriarPasta(
+    ["Entregas", "Entregas do Episódio"],
+    episodio.id,
+    accessToken,
+    "Entregas"
+  );
+
+  const finalizado = await obterOuCriarPasta(
+    [nomeBase, `Episódio ${numeroTexto}`, `EP ${numeroTexto}`],
+    finalizadosFolderId,
+    accessToken,
+    nomeBase
+  );
+
+  return {
+    ok: true,
+    episodioId: episodio.id,
+    episodio: episodio.webViewLink,
+    cortesId: cortes.id,
+    cortes: cortes.webViewLink,
+    entregasId: entregas.id,
+    entregas: entregas.webViewLink,
+    finalizadoId: finalizado.id,
+    finalizado: finalizado.webViewLink,
+  };
 }
 
 async function chamarAppsScript(payload: any) {
