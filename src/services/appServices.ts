@@ -1996,6 +1996,81 @@ export async function copiarFormulariosViaAppsScript(
   };
 }
 
+export async function criarAtualizarFormulariosProjeto(params: {
+  projectId: string;
+  projectName: string;
+  projectType?: string;
+  capaUrl?: string;
+  respostasSelecaoFolderId: string;
+  entregasFolderId: string;
+  personagensSelecao: string[];
+  personagensEntregas: string[];
+  elenco?: ElencoItem[];
+  episodios?: string[];
+  existingSelectionFormId?: string;
+  existingDeliveriesFormId?: string;
+}): Promise<any> {
+  const {
+    data: { session },
+    error: erroSessao,
+  } = await supabase.auth.getSession();
+
+  if (erroSessao || !session?.access_token) {
+    throw new Error("Sua sessão expirou. Entre novamente no DubWorks Manager.");
+  }
+
+  if (!params.respostasSelecaoFolderId || !params.entregasFolderId) {
+    throw new Error(
+      "Não encontrei as pastas de Seleção - Respostas e Entregas do projeto."
+    );
+  }
+
+  if (!params.personagensSelecao.length) {
+    throw new Error(
+      "Nenhum personagem está marcado como Em seleção. Marque ao menos um antes de atualizar o Form de Seleção."
+    );
+  }
+
+  if (!params.personagensEntregas.length) {
+    throw new Error("O Banco do Projeto está vazio.");
+  }
+
+  const response = await fetch("/api/forms-copy", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      projectId: params.projectId,
+      projectName: params.projectName,
+      projectType: params.projectType || "Projeto",
+      capaUrl: params.capaUrl || "",
+      respostasSelecaoFolderId: params.respostasSelecaoFolderId,
+      entregasFolderId: params.entregasFolderId,
+      personagens: params.personagensSelecao,
+      personagensSelecao: params.personagensSelecao,
+      personagensEntregas: params.personagensEntregas,
+      elenco: params.elenco || [],
+      episodios: params.episodios || [],
+      existingSelectionFormId: params.existingSelectionFormId || "",
+      existingDeliveriesFormId: params.existingDeliveriesFormId || "",
+    }),
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data || data.ok === false || data.error) {
+    throw new Error(
+      data?.error ||
+        data?.message ||
+        `Não foi possível criar/atualizar os formulários (HTTP ${response.status}).`
+    );
+  }
+
+  return data;
+}
+
 export function extrairGoogleFileId(urlOuId?: string) {
   const texto = String(urlOuId || "").trim();
   if (!texto) return "";
