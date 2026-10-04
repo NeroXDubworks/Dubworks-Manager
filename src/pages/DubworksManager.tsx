@@ -1612,10 +1612,44 @@ export default function DubworksManager() {
         pastaEntregas
       );
 
-      const entregasComProjeto = respostas.map((item) => ({
-        ...item,
-        projeto_id: Number(projeto.ID),
-      }));
+      const { data: episodiosProjeto, error: erroEpisodios } =
+        await supabase
+          .from("projeto_episodios")
+          .select("id,numero")
+          .eq("projeto_id", Number(projeto.ID));
+
+      if (erroEpisodios && erroEpisodios.code !== "42P01") {
+        console.warn(
+          "Não foi possível resolver episódios das entregas:",
+          erroEpisodios
+        );
+      }
+
+      const episodioPorNumero = new Map<number, number>(
+        (episodiosProjeto || []).map((item: any) => [
+          Number(item.numero),
+          Number(item.id),
+        ])
+      );
+
+      const entregasComProjeto = respostas.map((item) => {
+        const referencia = String(item.semana || "").trim();
+        const matchEpisodio = referencia.match(
+          /\b(?:EP|Episódio|Episodio)\s*0*(\d+)\b/i
+        );
+        const numeroEpisodio = matchEpisodio
+          ? Number(matchEpisodio[1])
+          : null;
+
+        return {
+          ...item,
+          projeto_id: Number(projeto.ID),
+          episodio_id:
+            numeroEpisodio && episodioPorNumero.has(numeroEpisodio)
+              ? episodioPorNumero.get(numeroEpisodio) || null
+              : null,
+        };
+      });
 
       const ok = await salvarEntregasProducaoBanco(
         projeto.ID,
