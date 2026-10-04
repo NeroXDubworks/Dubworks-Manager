@@ -333,7 +333,8 @@ function garantirUploadTemplate_(form, tipo) {
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    if (String(item.getType()) === String(FormApp.ItemType.FILE_UPLOAD)) {
+    const tipoItem = String(item.getType() || '').toUpperCase();
+    if (tipoItem.indexOf('FILE_UPLOAD') !== -1 || tipoItem.indexOf('UPLOAD') !== -1) {
       uploadItems.push(item);
     }
   }
@@ -502,7 +503,8 @@ function onProjectFormSubmit_(e) {
 
     responses.forEach(function (itemResponse) {
       const item = itemResponse.getItem();
-      if (String(item.getType()) !== String(FormApp.ItemType.FILE_UPLOAD)) {
+      const tipoItem = String(item.getType() || '').toUpperCase();
+      if (tipoItem.indexOf('FILE_UPLOAD') === -1 && tipoItem.indexOf('UPLOAD') === -1) {
         return;
       }
 
