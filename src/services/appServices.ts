@@ -1889,7 +1889,9 @@ export function assinarNotificacoes(
 export async function criarEstruturaDriveViaFunction(
   projetoNome: string,
   leaderEmail = "",
-  editorEmail = ""
+  editorEmail = "",
+  projectType = "Projeto",
+  capaUrl = ""
 ): Promise<DriveStructureResult> {
   const response = await fetch(
     "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure",
@@ -1902,8 +1904,10 @@ export async function criarEstruturaDriveViaFunction(
       },
       body: JSON.stringify({
         projectName: projetoNome,
+        projectType,
         leaderEmail,
         editorEmail,
+        capaUrl,
         folders: ["1 | Seleção", "2 | Projeto", "3 | Finalizado"],
       }),
     }
@@ -3075,34 +3079,42 @@ export async function salvarElencoProjetoBanco(
     }
   }
 
-  // Registros ativos que desapareceram da lista não são apagados.
-  // São encerrados para que semanas antigas continuem intactas.
-  const idsRecebidosNumericos = new Set(
-    (elenco || [])
-      .map((item) => String(item.id || "").trim())
-      .filter((id) => existentesPorId.has(id))
-  );
+  // IMPORTANTE: itens ausentes do rascunho NÃO são removidos automaticamente.
+  // Isso evita desativar personagens do Banco só porque uma tela carregou/salvou
+  // um subconjunto temporário. A retirada é sempre uma ação explícita.
+  return true;
+}
 
-  for (const existente of existentes || []) {
-    const id = String(existente.id);
+export async function retirarElencoProjetoBanco(
+  projetoId: string,
+  elencoId: string | number,
+  motivo = "Retirado do Banco do Projeto."
+): Promise<boolean> {
+  const projetoNumero = Number(projetoId);
+  const elencoNumero = Number(elencoId);
 
-    if (idsRecebidosNumericos.has(id)) continue;
+  if (!Number.isFinite(projetoNumero) || !Number.isFinite(elencoNumero)) {
+    console.error("Projeto/elenco inválido ao retirar do Banco:", {
+      projetoId,
+      elencoId,
+    });
+    return false;
+  }
 
-    const { error: erroEncerrarRemovido } = await supabase
-      .from("elenco")
-      .update({
-        ativo: false,
-        encerrado_em: agora,
-        motivo_encerramento: "Removido do Banco do Projeto.",
-      })
-      .eq("id", Number(existente.id))
-      .eq("projeto_id", projetoNumero)
-      .eq("ativo", true);
+  const { error } = await supabase
+    .from("elenco")
+    .update({
+      ativo: false,
+      encerrado_em: new Date().toISOString(),
+      motivo_encerramento: String(motivo || "Retirado do Banco do Projeto.").trim(),
+    })
+    .eq("id", elencoNumero)
+    .eq("projeto_id", projetoNumero)
+    .eq("ativo", true);
 
-    if (erroEncerrarRemovido) {
-      console.error("Erro ao encerrar personagem removido:", erroEncerrarRemovido);
-      return false;
-    }
+  if (error) {
+    console.error("Erro ao retirar personagem do Banco do Projeto:", error);
+    return false;
   }
 
   return true;
