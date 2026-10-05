@@ -85,6 +85,7 @@ function projetoNumero(projetoId: string | number) {
 }
 
 export async function criarEstruturaDriveEpisodio(params: {
+  projectId: string | number;
   projectFolderId: string;
   finalizadosFolderId: string;
   numero: number;
@@ -95,6 +96,7 @@ export async function criarEstruturaDriveEpisodio(params: {
     {
       body: {
         action: "criar_estrutura_episodio",
+        projectId: params.projectId,
         projectFolderId: params.projectFolderId,
         finalizadosFolderId: params.finalizadosFolderId,
         numero: params.numero,
@@ -136,6 +138,7 @@ async function moverEstruturaDriveEpisodio(
     {
       body: {
         action,
+        projectId: episodio.projeto_id,
         pastaDriveId: episodio.pasta_drive_id,
         pastaFinalizadoId: episodio.pasta_finalizado_id,
       },
