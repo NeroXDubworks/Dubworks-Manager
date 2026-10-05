@@ -59,6 +59,7 @@ import {
   mapMembroDb,
   criarEstruturaDriveViaFunction,
   criarAtualizarFormulariosProjeto,
+  finalizarArquivosProjeto,
   extrairGoogleFileId,
   extrairGoogleFolderId,
   converterDriveParaPreview,
@@ -142,6 +143,12 @@ import {
   type NotificacaoChat,
   type ParticipanteSemanaProjeto,
 } from "../services/appServices";
+
+function statusProjetoFinalizado(status?: string) {
+  return ["finalizado", "concluido", "concluida"].includes(
+    normalizar(String(status || ""))
+  );
+}
 
 const STATUS_PROJETO_OPCOES: string[] = [
   "Aguardando aprovação",
@@ -736,6 +743,22 @@ export default function DubworksManager() {
       if (!ok) {
         alert("Não consegui salvar a alteração no banco.");
         return;
+      }
+
+      if (
+        acaoPendenteIA.campo === "Status" &&
+        !statusProjetoFinalizado(valorAtualReal) &&
+        statusProjetoFinalizado(novoValor)
+      ) {
+        try {
+          await finalizarArquivosProjeto(projetoComHistorico);
+        } catch (erroFinalizacao: any) {
+          alert(
+            `O status foi salvo, mas os arquivos não puderam ser finalizados no Drive: ${
+              erroFinalizacao?.message || "erro desconhecido"
+            }`
+          );
+        }
       }
 
       await recarregarProjetos();
@@ -4737,6 +4760,53 @@ export default function DubworksManager() {
         projetoParaSalvarComHistorico.Capa_URL
       );
 
+      let retornoForms: any = null;
+
+      const respostasSelecaoFolderId =
+        resultadoDrive.respostasSelecaoId ||
+        extrairGoogleFolderId(resultadoDrive.respostasSelecao || "");
+      const entregasFolderId =
+        resultadoDrive.entregasProjetoId ||
+        extrairGoogleFolderId(resultadoDrive.entregasProjeto || "");
+
+      if (respostasSelecaoFolderId && entregasFolderId) {
+        try {
+          retornoForms = await criarAtualizarFormulariosProjeto({
+            projectId: projetoId,
+            projectName: projetoParaSalvarComHistorico.Projeto,
+            projectType: projetoParaSalvarComHistorico.Tipo || "Projeto",
+            capaUrl: projetoParaSalvarComHistorico.Capa_URL || "",
+            respostasSelecaoFolderId,
+            entregasFolderId,
+            personagensSelecao,
+            personagensEntregas: (projetoParaSalvarComHistorico.Elenco || [])
+              .map((item) => item.personagem.trim())
+              .filter(Boolean),
+            elenco: projetoParaSalvarComHistorico.Elenco || [],
+            episodios: [],
+          });
+        } catch (erroForms: any) {
+          console.error(
+            "Pastas criadas, mas os formulários não puderam ser sincronizados:",
+            erroForms
+          );
+          avisoAutomacao =
+            ` Pastas do Drive criadas, mas os formulários precisam ser tentados novamente: ${
+              erroForms?.message || "erro desconhecido"
+            }`;
+        }
+      }
+
+      const lerUrlForm = (valor: any) =>
+        String(
+          valor?.viewUrl ||
+            valor?.formUrl ||
+            valor?.url ||
+            valor?.editUrl ||
+            valor ||
+            ""
+        ).trim();
+
       const links = {
         pasta: resultadoDrive.pasta || "",
         selecao: resultadoDrive.selecao || "",
@@ -4746,10 +4816,10 @@ export default function DubworksManager() {
         respostasSelecao: resultadoDrive.respostasSelecao || "",
         cortesProjeto: resultadoDrive.cortesProjeto || "",
         entregasProjeto: resultadoDrive.entregasProjeto || "",
-        formSelecao: resultadoDrive.formSelecao || "",
-        formEntregas: resultadoDrive.formEntregas || "",
-        planilhaSelecao: resultadoDrive.planilhaSelecao || "",
-        planilhaEntregas: resultadoDrive.planilhaEntregas || "",
+        formSelecao: lerUrlForm(retornoForms?.formSelecao),
+        formEntregas: lerUrlForm(retornoForms?.formEntregas),
+        planilhaSelecao: lerUrlForm(retornoForms?.planilhaSelecao),
+        planilhaEntregas: lerUrlForm(retornoForms?.planilhaEntregas),
       };
 
       const projetoComLinks: Projeto = {
@@ -5243,8 +5313,23 @@ export default function DubworksManager() {
       return;
     }
 
+    let avisoFinalizacao = "";
+    if (
+      !statusProjetoFinalizado(selecionado.Status) &&
+      statusProjetoFinalizado(projetoFinalComHistorico.Status)
+    ) {
+      try {
+        await finalizarArquivosProjeto(projetoFinalComHistorico);
+      } catch (erroFinalizacao: any) {
+        avisoFinalizacao =
+          ` O status foi salvo, mas os arquivos não puderam ser movidos para 3 | Finalizado: ${
+            erroFinalizacao?.message || "erro desconhecido"
+          }`;
+      }
+    }
+
     await recarregarProjetos();
-    alert("Alterações salvas com sucesso.");
+    alert(`Alterações salvas com sucesso.${avisoFinalizacao}`);
   }
 
   async function salvarElencoAtual() {
