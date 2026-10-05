@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
       ],
       pastaSelecao.id,
       accessToken,
-      "Seleção (Testes)"
+      "[Seleção] Falas Teste"
     );
 
     const respostasSelecao = await obterOuCriarPasta(
@@ -217,7 +217,7 @@ Deno.serve(async (req) => {
       ],
       pastaSelecao.id,
       accessToken,
-      "Seleção - Respostas"
+      "[Seleção] Respostas"
     );
 
     const cortesProjeto = await obterOuCriarPasta(
@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
       ],
       pastaProjetoInterna.id,
       accessToken,
-      "Cortes Projeto"
+      "[Projeto] Cortes Projeto"
     );
 
     const entregasProjeto = await obterOuCriarPasta(
@@ -240,7 +240,7 @@ Deno.serve(async (req) => {
       ],
       pastaProjetoInterna.id,
       accessToken,
-      "Entregas Projeto"
+      "[Projeto] Entregas"
     );
 
     return json(
@@ -558,9 +558,16 @@ async function obterOuCriarPasta(
   for (const nome of nomes) {
     const encontrada = await encontrarPastaFilha(parentId, nome, token);
     if (encontrada) {
+      let nomeFinal = encontrada.name || nome;
+
+      if (nomeFinal !== nomeNovo) {
+        await renomearArquivoDrive(encontrada.id, nomeNovo, token);
+        nomeFinal = nomeNovo;
+      }
+
       return {
         id: encontrada.id,
-        name: encontrada.name || nome,
+        name: nomeFinal,
         webViewLink:
           encontrada.webViewLink ||
           `https://drive.google.com/drive/folders/${encontrada.id}`,
@@ -570,6 +577,34 @@ async function obterOuCriarPasta(
   }
 
   return criarPasta(nomeNovo, parentId, token);
+}
+
+async function renomearArquivoDrive(
+  fileId: string,
+  nome: string,
+  token: string
+) {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true&fields=id,name`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: nome }),
+    }
+  );
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || `Não foi possível renomear a pasta para ${nome}.`
+    );
+  }
+
+  return data;
 }
 
 async function encontrarPastaFilha(
