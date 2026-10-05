@@ -17,6 +17,10 @@ const FORM_TEMPLATE_DELIVERIES_WITH_UPLOAD =
   Deno.env.get("GOOGLE_FORMS_DELIVERIES_UPLOAD_TEMPLATE_ID") ||
   "1NUqciq8IgRdgKmFQA5wIFFP7eG46kaTqd4-qbpoLlpA";
 
+const FORM_UPLOAD_POOL_FOLDER_ID =
+  Deno.env.get("GOOGLE_FORMS_UPLOAD_POOL_FOLDER_ID") ||
+  "1Pq40GgxhxTCRp_Z5ePVUx01JCqZGxomK";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -469,6 +473,8 @@ async function prepararTemplatesForms(body: any, token: string) {
   const entregasFolderId = extrairId(body?.entregasFolderId);
   const falasTesteFolderId = extrairId(body?.falasTesteFolderId);
   const cortesProjetoFolderId = extrairId(body?.cortesProjetoFolderId);
+  const existingSelectionFormId = extrairId(body?.existingSelectionFormId);
+  const existingDeliveriesFormId = extrairId(body?.existingDeliveriesFormId);
 
   if (!projectName || !respostasSelecaoFolderId || !entregasFolderId) {
     throw new HttpError(
@@ -509,6 +515,7 @@ async function prepararTemplatesForms(body: any, token: string) {
     projectName,
     pastaDestinoId: respostasSelecaoFolderId,
     templateId: FORM_TEMPLATE_SELECTION_WITH_UPLOAD,
+    preferredFormId: existingSelectionFormId,
     token,
   });
 
@@ -517,6 +524,7 @@ async function prepararTemplatesForms(body: any, token: string) {
     projectName,
     pastaDestinoId: entregasFolderId,
     templateId: FORM_TEMPLATE_DELIVERIES_WITH_UPLOAD,
+    preferredFormId: existingDeliveriesFormId,
     token,
   });
 
@@ -546,6 +554,7 @@ async function garantirFormularioComUpload(params: {
   projectName: string;
   pastaDestinoId: string;
   templateId: string;
+  preferredFormId?: string;
   token: string;
 }) {
   const titulo =
@@ -553,36 +562,111 @@ async function garantirFormularioComUpload(params: {
       ? `[Seleção] ${params.projectName}`
       : `[Entregas] ${params.projectName}`;
 
+  if (params.preferredFormId) {
+    const preferido = await obterArquivoDrive(
+      params.preferredFormId,
+      params.token
+    );
+
+    if (
+      preferido &&
+      preferido.mimeType === "application/vnd.google-apps.form" &&
+      !preferido.trashed
+    ) {
+      await moverArquivoDrive(
+        params.preferredFormId,
+        params.pastaDestinoId,
+        params.token
+      );
+      if (preferido.name !== titulo) {
+        await renomearArquivoDrive(
+          params.preferredFormId,
+          titulo,
+          params.token
+        );
+      }
+      return { id: params.preferredFormId, reused: true };
+    }
+  }
+
   const existentes = await listarArquivosFilhosPorMime(
     params.pastaDestinoId,
     "application/vnd.google-apps.form",
     params.token
   );
 
-  for (const arquivo of existentes) {
-    if (await formularioTemUpload(arquivo.id, params.token)) {
-      if (arquivo.name !== titulo) {
-        await renomearArquivoDrive(arquivo.id, titulo, params.token);
-      }
-      return { id: arquivo.id, reused: true };
-    }
+  const exato = existentes.find(
+    (arquivo: any) =>
+      normalizarTextoDrive(arquivo.name) === normalizarTextoDrive(titulo) &&
+      !normalizarTextoDrive(arquivo.name).startsWith("[obsoleto]")
+  );
+
+  if (exato) {
+    return { id: exato.id, reused: true };
   }
 
-  const copia = await copiarArquivoDrive(
-    params.templateId,
+  const reserva = await retirarFormularioDaReserva(
+    params.tipo,
     params.pastaDestinoId,
     titulo,
     params.token
   );
 
-  if (!(await formularioTemUpload(copia.id, params.token))) {
-    await marcarArquivoComoLixeira(copia.id, params.token).catch(() => null);
+  if (!reserva) {
     throw new Error(
-      `O template de ${params.tipo === "selecao" ? "Seleção" : "Entregas"} não contém pergunta de upload.`
+      "A reserva automática de formulários com upload está vazia. Reponha a reserva do sistema."
     );
   }
 
-  return { id: copia.id, reused: false };
+  return { id: reserva.id, reused: false };
+}
+
+async function obterArquivoDrive(fileId: string, token: string) {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true&fields=id,name,mimeType,parents,trashed,webViewLink`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (response.status === 404) return null;
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || "Não foi possível localizar o formulário no Drive."
+    );
+  }
+  return data;
+}
+
+async function retirarFormularioDaReserva(
+  tipo: "selecao" | "entregas",
+  destinoId: string,
+  titulo: string,
+  token: string
+) {
+  const forms = await listarArquivosFilhosPorMime(
+    FORM_UPLOAD_POOL_FOLDER_ID,
+    "application/vnd.google-apps.form",
+    token
+  );
+
+  const prefixo =
+    tipo === "selecao" ? "[pool][selecao]" : "[pool][entregas]";
+
+  const candidato = forms
+    .filter((arquivo: any) =>
+      normalizarTextoDrive(arquivo.name).startsWith(prefixo)
+    )
+    .sort((a: any, b: any) =>
+      String(a.name || "").localeCompare(String(b.name || ""))
+    )[0];
+
+  if (!candidato) return null;
+
+  await moverArquivoDrive(candidato.id, destinoId, token);
+  await renomearArquivoDrive(candidato.id, titulo, token);
+
+  return { id: candidato.id, name: titulo };
 }
 
 async function listarArquivosFilhosPorMime(
@@ -617,58 +701,6 @@ async function listarArquivosFilhosPorMime(
   }
 
   return Array.isArray(data.files) ? data.files : [];
-}
-
-async function copiarArquivoDrive(
-  fileId: string,
-  parentId: string,
-  nome: string,
-  token: string
-) {
-  const response = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}/copy?supportsAllDrives=true&fields=id,name,mimeType,parents,webViewLink`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: nome,
-        parents: [parentId],
-      }),
-    }
-  );
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok || !data?.id) {
-    throw new Error(
-      data?.error?.message || "Não foi possível copiar o formulário-modelo."
-    );
-  }
-
-  return data;
-}
-
-async function obterFormularioGoogle(formId: string, token: string) {
-  const response = await fetch(
-    `https://forms.googleapis.com/v1/forms/${formId}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) return null;
-  return data;
-}
-
-async function formularioTemUpload(formId: string, token: string) {
-  const form = await obterFormularioGoogle(formId, token);
-  if (!form || !Array.isArray(form.items)) return false;
-
-  return form.items.some((item: any) =>
-    Boolean(item?.questionItem?.question?.fileUploadQuestion)
-  );
 }
 
 async function moverArquivoDrive(
@@ -710,27 +742,6 @@ async function moverArquivoDrive(
   if (!response.ok) {
     throw new Error(
       data?.error?.message || "Não foi possível mover o arquivo no Drive."
-    );
-  }
-}
-
-async function marcarArquivoComoLixeira(fileId: string, token: string) {
-  const response = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true&fields=id,trashed`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ trashed: true }),
-    }
-  );
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(
-      data?.error?.message || "Não foi possível arquivar o formulário antigo."
     );
   }
 }
