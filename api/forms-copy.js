@@ -1,5 +1,9 @@
 import { ApiAuthError, exigirAcessoProjeto } from "./_shared/projectAuth.js";
-import { PROJECT_FORMS_SCRIPT_URL } from "./_shared/runtimeConfig.js";
+import {
+  PROJECT_FORMS_SCRIPT_URL,
+  SUPABASE_PUBLISHABLE_KEY,
+  SUPABASE_URL,
+} from "./_shared/runtimeConfig.js";
 
 export const config = {
   maxDuration: 300,
@@ -54,6 +58,41 @@ function normalizarElenco(valor) {
       funcao: String(item?.funcao || "").trim(),
     }))
     .filter((item) => item.personagem);
+}
+
+async function prepararTemplatesFormsNoDrive(params) {
+  const response = await fetch(
+    `${SUPABASE_URL}/functions/v1/google-drive-create-structure`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${params.accessToken}`,
+      },
+      body: JSON.stringify({
+        action: "preparar_templates_forms",
+        projectId: params.projectId,
+        projectName: params.projectName,
+        respostasSelecaoFolderId: params.respostasSelecaoFolderId,
+        entregasFolderId: params.entregasFolderId,
+        falasTesteFolderId: params.falasTesteFolderId || "",
+        cortesProjetoFolderId: params.cortesProjetoFolderId || "",
+      }),
+    }
+  );
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data || data.ok === false || data.error) {
+    throw new Error(
+      data?.error ||
+        data?.message ||
+        "Não foi possível preparar os formulários com upload no Google Drive."
+    );
+  }
+
+  return data;
 }
 
 function limparRespostaGoogle(texto) {
@@ -117,9 +156,28 @@ export default async function handler(req, res) {
     const existingDeliveriesFormId = String(
       body?.existingDeliveriesFormId || body?.formEntregasId || body?.formEntregas || ""
     ).trim();
+    const falasTesteFolderId = String(body?.falasTesteFolderId || "").trim();
+    const cortesProjetoFolderId = String(body?.cortesProjetoFolderId || "").trim();
     const episodios = Array.isArray(body?.episodios)
       ? body.episodios.map((item) => String(item || "").trim()).filter(Boolean)
       : [];
+
+    const templates = await prepararTemplatesFormsNoDrive({
+      accessToken,
+      projectId,
+      projectName,
+      respostasSelecaoFolderId,
+      entregasFolderId,
+      falasTesteFolderId,
+      cortesProjetoFolderId,
+    });
+
+    const selectionFormIdComUpload = String(
+      templates?.formSelecaoId || existingSelectionFormId || ""
+    ).trim();
+    const deliveriesFormIdComUpload = String(
+      templates?.formEntregasId || existingDeliveriesFormId || ""
+    ).trim();
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 270000);
@@ -140,8 +198,8 @@ export default async function handler(req, res) {
           projetoNome: projectName,
           respostasSelecaoFolderId,
           entregasFolderId,
-          existingSelectionFormId,
-          existingDeliveriesFormId,
+          existingSelectionFormId: selectionFormIdComUpload,
+          existingDeliveriesFormId: deliveriesFormIdComUpload,
           episodios,
           personagens: personagensSelecao,
           personagensSelecao,

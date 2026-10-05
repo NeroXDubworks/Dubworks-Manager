@@ -10,6 +10,13 @@ const corsHeaders = {
 const PROJECT_FORMS_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
 
+const FORM_TEMPLATE_SELECTION_WITH_UPLOAD =
+  Deno.env.get("GOOGLE_FORMS_SELECTION_UPLOAD_TEMPLATE_ID") ||
+  "1v7atBpqrEH7LMGbvRlEZyD8U0YyhfPK4k_kPYUqPoM0";
+const FORM_TEMPLATE_DELIVERIES_WITH_UPLOAD =
+  Deno.env.get("GOOGLE_FORMS_DELIVERIES_UPLOAD_TEMPLATE_ID") ||
+  "1NUqciq8IgRdgKmFQA5wIFFP7eG46kaTqd4-qbpoLlpA";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -39,6 +46,12 @@ Deno.serve(async (req) => {
         : "edit";
 
     await exigirAcessoProjeto(projectId, usuario, modoAcesso);
+
+    if (body?.action === "preparar_templates_forms") {
+      const accessToken = await obterGoogleDriveAccessToken();
+      const resultado = await prepararTemplatesForms(body, accessToken);
+      return json(resultado, 200);
+    }
 
     if (body?.action === "criar_estrutura_episodio") {
       const accessToken = await obterGoogleDriveAccessToken();
@@ -205,7 +218,7 @@ Deno.serve(async (req) => {
       ],
       pastaSelecao.id,
       accessToken,
-      "Seleção (Testes)"
+      "[Seleção] Falas Teste"
     );
 
     const respostasSelecao = await obterOuCriarPasta(
@@ -217,7 +230,7 @@ Deno.serve(async (req) => {
       ],
       pastaSelecao.id,
       accessToken,
-      "Seleção - Respostas"
+      "[Seleção] Respostas"
     );
 
     const cortesProjeto = await obterOuCriarPasta(
@@ -228,7 +241,7 @@ Deno.serve(async (req) => {
       ],
       pastaProjetoInterna.id,
       accessToken,
-      "Cortes Projeto"
+      "[Projeto] Cortes Projeto"
     );
 
     const entregasProjeto = await obterOuCriarPasta(
@@ -240,7 +253,7 @@ Deno.serve(async (req) => {
       ],
       pastaProjetoInterna.id,
       accessToken,
-      "Entregas Projeto"
+      "[Projeto] Entregas"
     );
 
     return json(
@@ -450,6 +463,321 @@ async function obterGoogleDriveAccessToken() {
   return getAccessToken(jwt);
 }
 
+async function prepararTemplatesForms(body: any, token: string) {
+  const projectName = limparNomeProjeto(body?.projectName);
+  const respostasSelecaoFolderId = extrairId(body?.respostasSelecaoFolderId);
+  const entregasFolderId = extrairId(body?.entregasFolderId);
+  const falasTesteFolderId = extrairId(body?.falasTesteFolderId);
+  const cortesProjetoFolderId = extrairId(body?.cortesProjetoFolderId);
+
+  if (!projectName || !respostasSelecaoFolderId || !entregasFolderId) {
+    throw new HttpError(
+      400,
+      "Nome do projeto e pastas de Seleção/Entregas são obrigatórios."
+    );
+  }
+
+  await renomearArquivoDrive(
+    respostasSelecaoFolderId,
+    "[Seleção] Respostas",
+    token
+  );
+  await renomearArquivoDrive(
+    entregasFolderId,
+    "[Projeto] Entregas",
+    token
+  );
+
+  if (falasTesteFolderId) {
+    await renomearArquivoDrive(
+      falasTesteFolderId,
+      "[Seleção] Falas Teste",
+      token
+    );
+  }
+
+  if (cortesProjetoFolderId) {
+    await renomearArquivoDrive(
+      cortesProjetoFolderId,
+      "[Projeto] Cortes Projeto",
+      token
+    );
+  }
+
+  const formSelecao = await garantirFormularioComUpload({
+    tipo: "selecao",
+    projectName,
+    pastaDestinoId: respostasSelecaoFolderId,
+    templateId: FORM_TEMPLATE_SELECTION_WITH_UPLOAD,
+    token,
+  });
+
+  const formEntregas = await garantirFormularioComUpload({
+    tipo: "entregas",
+    projectName,
+    pastaDestinoId: entregasFolderId,
+    templateId: FORM_TEMPLATE_DELIVERIES_WITH_UPLOAD,
+    token,
+  });
+
+  if (falasTesteFolderId) {
+    await retirarFormulariosDaPastaFalasTeste(
+      falasTesteFolderId,
+      respostasSelecaoFolderId,
+      projectName,
+      formSelecao.id,
+      token
+    );
+  }
+
+  return {
+    ok: true,
+    formSelecaoId: formSelecao.id,
+    formEntregasId: formEntregas.id,
+    reused: {
+      selecao: formSelecao.reused,
+      entregas: formEntregas.reused,
+    },
+  };
+}
+
+async function garantirFormularioComUpload(params: {
+  tipo: "selecao" | "entregas";
+  projectName: string;
+  pastaDestinoId: string;
+  templateId: string;
+  token: string;
+}) {
+  const titulo =
+    params.tipo === "selecao"
+      ? `[Seleção] ${params.projectName}`
+      : `[Entregas] ${params.projectName}`;
+
+  const existentes = await listarArquivosFilhosPorMime(
+    params.pastaDestinoId,
+    "application/vnd.google-apps.form",
+    params.token
+  );
+
+  for (const arquivo of existentes) {
+    if (await formularioTemUpload(arquivo.id, params.token)) {
+      if (arquivo.name !== titulo) {
+        await renomearArquivoDrive(arquivo.id, titulo, params.token);
+      }
+      return { id: arquivo.id, reused: true };
+    }
+  }
+
+  const copia = await copiarArquivoDrive(
+    params.templateId,
+    params.pastaDestinoId,
+    titulo,
+    params.token
+  );
+
+  if (!(await formularioTemUpload(copia.id, params.token))) {
+    await marcarArquivoComoLixeira(copia.id, params.token).catch(() => null);
+    throw new Error(
+      `O template de ${params.tipo === "selecao" ? "Seleção" : "Entregas"} não contém pergunta de upload.`
+    );
+  }
+
+  return { id: copia.id, reused: false };
+}
+
+async function listarArquivosFilhosPorMime(
+  parentId: string,
+  mimeType: string,
+  token: string
+) {
+  const q = [
+    `'${escaparDriveQuery(parentId)}' in parents`,
+    `mimeType = '${escaparDriveQuery(mimeType)}'`,
+    "trashed = false",
+  ].join(" and ");
+
+  const params = new URLSearchParams({
+    q,
+    fields: "files(id,name,mimeType,parents,webViewLink)",
+    pageSize: "100",
+    supportsAllDrives: "true",
+    includeItemsFromAllDrives: "true",
+  });
+
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || "Não foi possível listar os arquivos da pasta."
+    );
+  }
+
+  return Array.isArray(data.files) ? data.files : [];
+}
+
+async function copiarArquivoDrive(
+  fileId: string,
+  parentId: string,
+  nome: string,
+  token: string
+) {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}/copy?supportsAllDrives=true&fields=id,name,mimeType,parents,webViewLink`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: nome,
+        parents: [parentId],
+      }),
+    }
+  );
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data?.id) {
+    throw new Error(
+      data?.error?.message || "Não foi possível copiar o formulário-modelo."
+    );
+  }
+
+  return data;
+}
+
+async function obterFormularioGoogle(formId: string, token: string) {
+  const response = await fetch(
+    `https://forms.googleapis.com/v1/forms/${formId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) return null;
+  return data;
+}
+
+async function formularioTemUpload(formId: string, token: string) {
+  const form = await obterFormularioGoogle(formId, token);
+  if (!form || !Array.isArray(form.items)) return false;
+
+  return form.items.some((item: any) =>
+    Boolean(item?.questionItem?.question?.fileUploadQuestion)
+  );
+}
+
+async function moverArquivoDrive(
+  fileId: string,
+  destinoId: string,
+  token: string
+) {
+  const infoResponse = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,parents&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const info = await infoResponse.json().catch(() => null);
+
+  if (!infoResponse.ok) {
+    throw new Error(
+      info?.error?.message || "Não foi possível localizar o arquivo no Drive."
+    );
+  }
+
+  const parents = Array.isArray(info?.parents) ? info.parents : [];
+  if (parents.includes(destinoId) && parents.length === 1) return;
+
+  const query = new URLSearchParams({
+    addParents: destinoId,
+    supportsAllDrives: "true",
+    fields: "id,parents",
+  });
+  if (parents.length) query.set("removeParents", parents.join(","));
+
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?${query.toString()}`,
+    {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || "Não foi possível mover o arquivo no Drive."
+    );
+  }
+}
+
+async function marcarArquivoComoLixeira(fileId: string, token: string) {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true&fields=id,trashed`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ trashed: true }),
+    }
+  );
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(
+      data?.error?.message || "Não foi possível arquivar o formulário antigo."
+    );
+  }
+}
+
+async function retirarFormulariosDaPastaFalasTeste(
+  falasTesteFolderId: string,
+  respostasSelecaoFolderId: string,
+  projectName: string,
+  formCorretoId: string,
+  token: string
+) {
+  const forms = await listarArquivosFilhosPorMime(
+    falasTesteFolderId,
+    "application/vnd.google-apps.form",
+    token
+  );
+
+  const chaveProjeto = normalizarTextoDrive(projectName);
+
+  for (const form of forms) {
+    if (form.id === formCorretoId) continue;
+
+    const nomeNormalizado = normalizarTextoDrive(form.name);
+    if (
+      !nomeNormalizado.includes(chaveProjeto) &&
+      !nomeNormalizado.includes("selecao")
+    ) {
+      continue;
+    }
+
+    await moverArquivoDrive(form.id, respostasSelecaoFolderId, token);
+    await renomearArquivoDrive(
+      form.id,
+      `[OBSOLETO] ${form.name || "[Seleção] " + projectName}`,
+      token
+    );
+  }
+}
+
+function normalizarTextoDrive(valor: unknown) {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+}
+
 async function moverConteudoPasta(
   origemId: string,
   destinoId: string,
@@ -558,9 +886,16 @@ async function obterOuCriarPasta(
   for (const nome of nomes) {
     const encontrada = await encontrarPastaFilha(parentId, nome, token);
     if (encontrada) {
+      let nomeFinal = encontrada.name || nome;
+
+      if (nomeFinal !== nomeNovo) {
+        await renomearArquivoDrive(encontrada.id, nomeNovo, token);
+        nomeFinal = nomeNovo;
+      }
+
       return {
         id: encontrada.id,
-        name: encontrada.name || nome,
+        name: nomeFinal,
         webViewLink:
           encontrada.webViewLink ||
           `https://drive.google.com/drive/folders/${encontrada.id}`,
@@ -570,6 +905,34 @@ async function obterOuCriarPasta(
   }
 
   return criarPasta(nomeNovo, parentId, token);
+}
+
+async function renomearArquivoDrive(
+  fileId: string,
+  nome: string,
+  token: string
+) {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true&fields=id,name`,
+    {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: nome }),
+    }
+  );
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error?.message || `Não foi possível renomear a pasta para ${nome}.`
+    );
+  }
+
+  return data;
 }
 
 async function encontrarPastaFilha(

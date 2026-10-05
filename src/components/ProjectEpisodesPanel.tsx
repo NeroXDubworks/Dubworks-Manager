@@ -272,6 +272,8 @@ export default function ProjectEpisodesPanel({
       capaUrl: projeto.Capa_URL || "",
       respostasSelecaoFolderId,
       entregasFolderId,
+      falasTesteFolderId: extrairGoogleFolderId(links.falasTeste || ""),
+      cortesProjetoFolderId: extrairGoogleFolderId(links.cortesProjeto || ""),
       personagensSelecao,
       personagensEntregas,
       elenco: projeto.Elenco || [],
