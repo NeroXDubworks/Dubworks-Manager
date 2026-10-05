@@ -8,8 +8,7 @@ const corsHeaders = {
 };
 
 const PROJECT_FORMS_SCRIPT_URL =
-  Deno.env.get("GOOGLE_PROJECT_FORMS_SCRIPT_URL") ||
-  "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
+  "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
