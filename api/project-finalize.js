@@ -1,9 +1,5 @@
 import { ApiAuthError, exigirAcessoProjeto } from "./_shared/projectAuth.js";
-import {
-  PROJECT_FORMS_SCRIPT_URL,
-  SUPABASE_PUBLISHABLE_KEY,
-  SUPABASE_URL,
-} from "./_shared/runtimeConfig.js";
+import { PROJECT_FORMS_SCRIPT_URL } from "./_shared/runtimeConfig.js";
 
 export const config = {
   maxDuration: 60,
@@ -27,11 +23,6 @@ function lerBody(req) {
   }
 
   return null;
-}
-
-function extrairAccessToken(req) {
-  const authorization = String(req.headers.authorization || "").trim();
-  return authorization.replace(/^Bearer\s+/i, "").trim();
 }
 
 export default async function handler(req, res) {
