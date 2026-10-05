@@ -1938,8 +1938,23 @@ export async function publicarIntegracaoFormsProjetos(): Promise<{
   );
 
   if (error) {
+    let detalhe = "";
+
+    try {
+      const contexto = (error as any)?.context;
+      const payload =
+        contexto && typeof contexto.json === "function"
+          ? await contexto.json()
+          : null;
+      detalhe = String(payload?.error || payload?.message || "").trim();
+    } catch {
+      detalhe = "";
+    }
+
     throw new Error(
-      error.message || "Não foi possível publicar a integração Google Forms."
+      detalhe ||
+        error.message ||
+        "Não foi possível publicar a integração Google Forms."
     );
   }
 
