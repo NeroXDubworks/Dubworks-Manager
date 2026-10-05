@@ -1,6 +1,6 @@
 function instalarDubWorksV2() {
   var scriptId = ScriptApp.getScriptId();
-  var deploymentId = 'AKfycbwLWwc_Lz9iQ-u0X0mavgs85XQOmr590tgCrEYC5MhJhBjVhsFgE0ExlbqZVZxUUt8W';
+  var deploymentId = 'AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC';
   var rawUrl = 'https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/main/integracoes/google-forms-projetos/Code.gs';
   var token = ScriptApp.getOAuthToken();
   var headers = {
