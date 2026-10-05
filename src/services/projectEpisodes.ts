@@ -118,6 +118,60 @@ export async function criarEstruturaDriveEpisodio(params: {
   };
 }
 
+async function moverEstruturaDriveEpisodio(
+  action: "finalizar_episodio" | "reabrir_episodio",
+  episodio: ProjetoEpisodio
+) {
+  if (!episodio.pasta_drive_id || !episodio.pasta_finalizado_id) {
+    return { ok: true, movidos: 0, legadoSemPastas: true };
+  }
+
+  const { data, error } = await supabase.functions.invoke(
+    "google-drive-create-structure",
+    {
+      body: {
+        action,
+        pastaDriveId: episodio.pasta_drive_id,
+        pastaFinalizadoId: episodio.pasta_finalizado_id,
+      },
+    }
+  );
+
+  if (error) throw error;
+  if (!data || data.error || data.ok === false) {
+    throw new Error(
+      String(
+        data?.error ||
+          data?.message ||
+          "Não foi possível mover os arquivos do episódio no Google Drive."
+      )
+    );
+  }
+
+  return data;
+}
+
+export async function iniciarProducaoEpisodio(
+  episodio: ProjetoEpisodio,
+  usuario?: string
+) {
+  const atualizado = await atualizarEpisodioProjeto(episodio.id, {
+    status: "em_producao",
+    data_inicio:
+      episodio.data_inicio || new Date().toISOString().slice(0, 10),
+  });
+
+  await registrarHistoricoEpisodio({
+    projetoId: episodio.projeto_id,
+    episodioId: episodio.id,
+    tipo: "producao_iniciada",
+    descricao: "Produção do episódio iniciada.",
+    usuario,
+  });
+
+  return atualizado;
+}
+
 export async function carregarEpisodiosProjeto(
   projetoId: string | number
 ): Promise<ProjetoEpisodio[]> {
@@ -210,6 +264,10 @@ export async function finalizarEpisodioProjeto(params: {
   const dataConclusao =
     params.dataConclusao || new Date().toISOString().slice(0, 10);
 
+  if (!params.legado) {
+    await moverEstruturaDriveEpisodio("finalizar_episodio", params.episodio);
+  }
+
   const atualizado = await atualizarEpisodioProjeto(params.episodio.id, {
     status: "finalizado",
     data_conclusao: dataConclusao,
@@ -237,6 +295,10 @@ export async function reabrirEpisodioProjeto(
   episodio: ProjetoEpisodio,
   usuario?: string
 ) {
+  if (!episodio.registro_legado) {
+    await moverEstruturaDriveEpisodio("reabrir_episodio", episodio);
+  }
+
   const atualizado = await atualizarEpisodioProjeto(episodio.id, {
     status: "em_producao",
     data_conclusao: null,
@@ -271,6 +333,7 @@ export async function adicionarElencoAoEpisodio(params: {
   projetoId: string | number;
   episodioId: number;
   item: ElencoItem;
+  usuario?: string;
 }) {
   const elencoId = Number(params.item.id);
   const payload = {
@@ -292,16 +355,42 @@ export async function adicionarElencoAoEpisodio(params: {
     .single();
 
   if (error) throw error;
+
+  await registrarHistoricoEpisodio({
+    projetoId: params.projetoId,
+    episodioId: params.episodioId,
+    tipo: "elenco_adicionado",
+    descricao: "Personagem " + payload.personagem + " adicionado ao episódio.",
+    usuario: params.usuario,
+    dados: { personagem: payload.personagem, dublador: payload.dublador },
+  });
+
   return data as EpisodioElenco;
 }
 
-export async function removerElencoDoEpisodio(episodioElencoId: number) {
+export async function removerElencoDoEpisodio(params: {
+  episodioElencoId: number;
+  projetoId: string | number;
+  episodioId: number;
+  personagem?: string;
+  usuario?: string;
+}) {
   const { error } = await supabase
     .from("episodio_elenco")
     .delete()
-    .eq("id", episodioElencoId);
+    .eq("id", params.episodioElencoId);
 
   if (error) throw error;
+
+  await registrarHistoricoEpisodio({
+    projetoId: params.projetoId,
+    episodioId: params.episodioId,
+    tipo: "elenco_removido",
+    descricao:
+      "Personagem " + (params.personagem || "sem identificação") + " removido do episódio.",
+    usuario: params.usuario,
+    dados: { personagem: params.personagem || null },
+  });
 }
 
 export async function carregarEntregasEpisodio(
