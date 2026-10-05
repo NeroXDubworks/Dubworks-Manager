@@ -4783,6 +4783,12 @@ export default function DubworksManager() {
             capaUrl: projetoParaSalvarComHistorico.Capa_URL || "",
             respostasSelecaoFolderId,
             entregasFolderId,
+            falasTesteFolderId:
+              resultadoDrive.falasTesteId ||
+              extrairGoogleFolderId(resultadoDrive.falasTeste || ""),
+            cortesProjetoFolderId:
+              resultadoDrive.cortesProjetoId ||
+              extrairGoogleFolderId(resultadoDrive.cortesProjeto || ""),
             personagensSelecao: personagensEmSelecao,
             personagensEntregas: (projetoParaSalvarComHistorico.Elenco || [])
               .map((item) => item.personagem.trim())
@@ -5040,6 +5046,8 @@ export default function DubworksManager() {
         capaUrl: rascunho.Capa_URL || projetoPainel.Capa_URL || "",
         respostasSelecaoFolderId,
         entregasFolderId,
+        falasTesteFolderId: extrairGoogleFolderId(links.falasTeste || ""),
+        cortesProjetoFolderId: extrairGoogleFolderId(links.cortesProjeto || ""),
         personagensSelecao,
         personagensEntregas,
         elenco: rascunho.Elenco || [],
