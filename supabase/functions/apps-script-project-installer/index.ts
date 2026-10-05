@@ -9,6 +9,9 @@ const DEPLOYMENT_ID =
 const RAW_CODE_URL =
   Deno.env.get("GOOGLE_PROJECT_FORMS_SOURCE_URL") ||
   "https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/main/integracoes/google-forms-projetos/Code.gs";
+const RAW_MANIFEST_URL =
+  Deno.env.get("GOOGLE_PROJECT_FORMS_MANIFEST_URL") ||
+  "https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/main/integracoes/google-forms-projetos/appsscript.json";
 
 class HttpError extends Error {
   status: number;
@@ -43,21 +46,25 @@ Deno.serve(async (req) => {
       throw new Error("Code.gs validation failed");
     }
 
+    const manifestResp = await fetch(RAW_MANIFEST_URL);
+    if (!manifestResp.ok) {
+      throw new Error("appsscript.json download failed: " + manifestResp.status);
+    }
+    const manifest = await manifestResp.text();
+    const manifestData = JSON.parse(manifest);
+    if (
+      manifestData?.webapp?.executeAs !== "USER_DEPLOYING" ||
+      manifestData?.webapp?.access !== "ANYONE_ANONYMOUS"
+    ) {
+      throw new Error("appsscript.json webapp validation failed");
+    }
+
     const jwt = await createJWT(email, privateKey);
     const token = await getAccessToken(jwt);
     const headers = {
       Authorization: "Bearer " + token,
       "Content-Type": "application/json",
     };
-    const manifest = JSON.stringify(
-      {
-        timeZone: "America/Sao_Paulo",
-        exceptionLogging: "STACKDRIVER",
-        runtimeVersion: "V8",
-      },
-      null,
-      2
-    );
 
     let r = await fetch(
       "https://script.googleapis.com/v1/projects/" + SCRIPT_ID + "/content",
