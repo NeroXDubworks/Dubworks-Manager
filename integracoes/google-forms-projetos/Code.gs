@@ -685,11 +685,16 @@ function lerRespostas_(payload, tipo) {
   }
 
   if (!spreadsheetId) {
-    throw new Error(
-      'Não encontrei a planilha de respostas de ' +
+    return {
+      ok: true,
+      respostas: [],
+      spreadsheetId: '',
+      spreadsheetUrl: '',
+      aviso:
+        'Nenhuma planilha de respostas de ' +
         (tipo === 'selecao' ? 'Seleção' : 'Entregas') +
-        '.'
-    );
+        ' foi localizada ainda.',
+    };
   }
 
   const ss = SpreadsheetApp.openById(spreadsheetId);
