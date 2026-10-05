@@ -10,7 +10,7 @@ const corsHeaders = {
 const PROJECT_FORMS_SCRIPT_URL =
   Deno.env.get("GOOGLE_PROJECT_FORMS_SCRIPT_URL") ||
   Deno.env.get("GOOGLE_FORMS_COPIER_URL") ||
-  "";
+  "https://script.google.com/macros/s/AKfycbwLWwc_Lz9iQ-u0X0mavgs85XQOmr590tgCrEYC5MhJhBjVhsFgE0ExlbqZVZxUUt8W/exec";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
