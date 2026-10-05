@@ -1925,52 +1925,6 @@ async function invocarIntegracaoDrive<T = any>(body: Record<string, unknown>): P
   return data as T;
 }
 
-export async function publicarIntegracaoFormsProjetos(): Promise<{
-  ok: boolean;
-  versionNumber?: number;
-  publishedBy?: string;
-}> {
-  const { data, error } = await supabase.functions.invoke(
-    "apps-script-project-installer",
-    {
-      body: { action: "publish" },
-    }
-  );
-
-  if (error) {
-    let detalhe = "";
-
-    try {
-      const contexto = (error as any)?.context;
-      const payload =
-        contexto && typeof contexto.json === "function"
-          ? await contexto.json()
-          : null;
-      detalhe = String(payload?.error || payload?.message || "").trim();
-    } catch {
-      detalhe = "";
-    }
-
-    throw new Error(
-      detalhe ||
-        error.message ||
-        "Não foi possível publicar a integração Google Forms."
-    );
-  }
-
-  if (!data || data.ok === false || data.error) {
-    throw new Error(
-      String(
-        data?.error ||
-          data?.message ||
-          "A publicação da integração Google Forms falhou."
-      )
-    );
-  }
-
-  return data;
-}
-
 export async function criarEstruturaDriveViaFunction(
   projetoNome: string,
   leaderEmail = "",
