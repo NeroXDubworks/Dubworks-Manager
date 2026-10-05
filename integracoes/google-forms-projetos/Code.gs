@@ -104,10 +104,10 @@ function prepararFormulariosProjeto_(payload) {
 
   if (!projectName) throw new Error('Nome do projeto não informado.');
   if (!respostasSelecaoFolderId) {
-    throw new Error('Pasta Seleção - Respostas não informada.');
+    throw new Error('Pasta [Seleção] Respostas não informada.');
   }
   if (!entregasFolderId) {
-    throw new Error('Pasta de Entregas não informada.');
+    throw new Error('Pasta [Projeto] Entregas não informada.');
   }
   if (!personagensEntregas.length) {
     throw new Error('O Banco do Projeto está vazio; o formulário de Entregas não pode ser sincronizado.');
@@ -169,6 +169,12 @@ function prepararFormulariosProjeto_(payload) {
     pastaSelecaoRespostas
   );
 
+  garantirLocalizacaoFormulario_(
+    selecao.form,
+    pastaSelecaoRespostas,
+    selecaoSheet
+  );
+
   registrarDestinoUpload_(
     selecao.form,
     pastaSelecaoRespostas,
@@ -201,6 +207,12 @@ function prepararFormulariosProjeto_(payload) {
     entregas.form,
     '[Entregas] - ' + projectName + ' - Respostas',
     pastaEntregas
+  );
+
+  garantirLocalizacaoFormulario_(
+    entregas.form,
+    pastaEntregas,
+    entregasSheet
   );
 
   registrarDestinoUpload_(
@@ -645,6 +657,17 @@ function sincronizarFormulario_(payload, tipo) {
     atualizarEpisodiosEntregas_(form, episodios);
   }
 
+  const pastaDestinoId = extrairId_(
+    tipo === 'selecao'
+      ? payload.respostasSelecaoFolderId || payload.folderId
+      : payload.entregasFolderId || payload.folderId
+  );
+
+  if (pastaDestinoId) {
+    const pastaDestino = DriveApp.getFolderById(pastaDestinoId);
+    garantirLocalizacaoFormulario_(form, pastaDestino);
+  }
+
   return {
     ok: true,
     form: infoFormulario_(form),
@@ -888,6 +911,22 @@ function arquivoEhVideo_(arquivo) {
   return /\.(mp4|mov|m4v|avi|mkv|webm|wmv|mpeg|mpg|3gp|ts|mts|m2ts)$/.test(
     nome
   );
+}
+
+function garantirLocalizacaoFormulario_(form, pasta, planilha) {
+  moverArquivoParaPasta_(form.getId(), pasta);
+
+  if (planilha && planilha.getId) {
+    moverArquivoParaPasta_(planilha.getId(), pasta);
+    return;
+  }
+
+  try {
+    const destinoId = form.getDestinationId();
+    if (destinoId) {
+      moverArquivoParaPasta_(destinoId, pasta);
+    }
+  } catch (_) {}
 }
 
 function moverArquivoParaPasta_(fileId, pasta) {
