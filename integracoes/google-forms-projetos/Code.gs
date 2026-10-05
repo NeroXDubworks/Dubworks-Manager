@@ -109,11 +109,6 @@ function prepararFormulariosProjeto_(payload) {
   if (!entregasFolderId) {
     throw new Error('Pasta de Entregas não informada.');
   }
-  if (!personagensSelecao.length) {
-    throw new Error(
-      'Nenhum personagem marcado como Em seleção foi recebido. O formulário não será criado com “A definir”.'
-    );
-  }
   if (!personagensEntregas.length) {
     throw new Error('O Banco do Projeto está vazio; o formulário de Entregas não pode ser sincronizado.');
   }
@@ -161,9 +156,12 @@ function prepararFormulariosProjeto_(payload) {
   prepararFormulario_(selecao.form, {
     tipo: 'selecao',
     projectName: projectName,
-    personagens: personagensSelecao,
+    personagens: personagensSelecao.length
+      ? personagensSelecao
+      : ['Seleção encerrada'],
     capaUrl: capaUrl,
   });
+  selecao.form.setAcceptingResponses(Boolean(personagensSelecao.length));
 
   const selecaoSheet = garantirPlanilhaRespostas_(
     selecao.form,
@@ -620,12 +618,8 @@ function sincronizarFormulario_(payload, tipo) {
   );
   const episodios = normalizarLista_(payload.episodios || []);
 
-  if (!personagens.length) {
-    throw new Error(
-      tipo === 'selecao'
-        ? 'Nenhum personagem marcado como Em seleção foi recebido.'
-        : 'O Banco do Projeto está vazio.'
-    );
+  if (!personagens.length && tipo !== 'selecao') {
+    throw new Error('O Banco do Projeto está vazio.');
   }
 
   const form = FormApp.openById(formId);
@@ -636,9 +630,16 @@ function sincronizarFormulario_(payload, tipo) {
   prepararFormulario_(form, {
     tipo: tipo,
     projectName: projectName,
-    personagens: personagens,
+    personagens:
+      tipo === 'selecao' && !personagens.length
+        ? ['Seleção encerrada']
+        : personagens,
     capaUrl: String(payload.capaUrl || payload.coverUrl || '').trim(),
   });
+
+  if (tipo === 'selecao') {
+    form.setAcceptingResponses(Boolean(personagens.length));
+  }
 
   if (tipo === 'entregas') {
     atualizarEpisodiosEntregas_(form, episodios);
