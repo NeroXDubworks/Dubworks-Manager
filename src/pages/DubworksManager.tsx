@@ -59,7 +59,8 @@ import {
   mapMembroDb,
   criarEstruturaDriveViaFunction,
   criarAtualizarFormulariosProjeto,
-  copiarFormulariosViaAppsScript,
+  publicarIntegracaoFormsProjetos,
+  finalizarArquivosProjeto,
   extrairGoogleFileId,
   extrairGoogleFolderId,
   converterDriveParaPreview,
@@ -143,6 +144,12 @@ import {
   type NotificacaoChat,
   type ParticipanteSemanaProjeto,
 } from "../services/appServices";
+
+function statusProjetoFinalizado(status?: string) {
+  return ["finalizado", "concluido", "concluida"].includes(
+    normalizar(String(status || ""))
+  );
+}
 
 const STATUS_PROJETO_OPCOES: string[] = [
   "Aguardando aprovação",
@@ -408,6 +415,8 @@ export default function DubworksManager() {
     useState<ElencoItem>(elencoVazio);
   const [criandoEstruturaDrive, setCriandoEstruturaDrive] = useState(false);
   const [sincronizandoFormulariosProjeto, setSincronizandoFormulariosProjeto] =
+    useState(false);
+  const [publicandoIntegracaoForms, setPublicandoIntegracaoForms] =
     useState(false);
   const [respostasSelecao, setRespostasSelecao] = useState<RespostaSelecao[]>(
     []
@@ -739,6 +748,22 @@ export default function DubworksManager() {
         return;
       }
 
+      if (
+        acaoPendenteIA.campo === "Status" &&
+        !statusProjetoFinalizado(valorAtualReal) &&
+        statusProjetoFinalizado(novoValor)
+      ) {
+        try {
+          await finalizarArquivosProjeto(projetoComHistorico);
+        } catch (erroFinalizacao: any) {
+          alert(
+            `O status foi salvo, mas os arquivos não puderam ser finalizados no Drive: ${
+              erroFinalizacao?.message || "erro desconhecido"
+            }`
+          );
+        }
+      }
+
       await recarregarProjetos();
 
       setHistoricoIA((anterior) => [
@@ -859,6 +884,7 @@ export default function DubworksManager() {
     try {
       setSincronizandoSelecao(true);
       const respostas = await lerRespostasSelecaoViaAppsScript(
+        projeto.ID,
         planilhaSelecao,
         pastaRespostasSelecao
       );
@@ -913,6 +939,7 @@ export default function DubworksManager() {
       try {
         setSincronizandoSelecao(true);
         const respostas = await lerRespostasSelecaoViaAppsScript(
+          projeto.ID,
           links.planilhaSelecao || "",
           links.respostasSelecao || links.selecao || ""
         );
@@ -945,6 +972,7 @@ export default function DubworksManager() {
       try {
         setSincronizandoEntregas(true);
         const respostas = await lerRespostasEntregasViaEdge(
+          projeto.ID,
           links.planilhaEntregas || "",
           links.entregasProjeto || links.projeto || ""
         );
@@ -1608,6 +1636,7 @@ export default function DubworksManager() {
       setSincronizandoEntregas(true);
 
       const respostas = await lerRespostasEntregasViaEdge(
+        projeto.ID,
         planilhaEntregas,
         pastaEntregas
       );
@@ -4735,8 +4764,56 @@ export default function DubworksManager() {
         liderEmail,
         editorEmail,
         projetoParaSalvarComHistorico.Tipo,
-        projetoParaSalvarComHistorico.Capa_URL
+        projetoParaSalvarComHistorico.Capa_URL,
+        projetoId
       );
+
+      let retornoForms: any = null;
+
+      const respostasSelecaoFolderId =
+        resultadoDrive.respostasSelecaoId ||
+        extrairGoogleFolderId(resultadoDrive.respostasSelecao || "");
+      const entregasFolderId =
+        resultadoDrive.entregasProjetoId ||
+        extrairGoogleFolderId(resultadoDrive.entregasProjeto || "");
+
+      if (respostasSelecaoFolderId && entregasFolderId) {
+        try {
+          retornoForms = await criarAtualizarFormulariosProjeto({
+            projectId: projetoId,
+            projectName: projetoParaSalvarComHistorico.Projeto,
+            projectType: projetoParaSalvarComHistorico.Tipo || "Projeto",
+            capaUrl: projetoParaSalvarComHistorico.Capa_URL || "",
+            respostasSelecaoFolderId,
+            entregasFolderId,
+            personagensSelecao: personagensEmSelecao,
+            personagensEntregas: (projetoParaSalvarComHistorico.Elenco || [])
+              .map((item) => item.personagem.trim())
+              .filter(Boolean),
+            elenco: projetoParaSalvarComHistorico.Elenco || [],
+            episodios: [],
+          });
+        } catch (erroForms: any) {
+          console.error(
+            "Pastas criadas, mas os formulários não puderam ser sincronizados:",
+            erroForms
+          );
+          avisoAutomacao =
+            ` Pastas do Drive criadas, mas os formulários precisam ser tentados novamente: ${
+              erroForms?.message || "erro desconhecido"
+            }`;
+        }
+      }
+
+      const lerUrlForm = (valor: any) =>
+        String(
+          valor?.viewUrl ||
+            valor?.formUrl ||
+            valor?.url ||
+            valor?.editUrl ||
+            valor ||
+            ""
+        ).trim();
 
       const links = {
         pasta: resultadoDrive.pasta || "",
@@ -4746,12 +4823,11 @@ export default function DubworksManager() {
         falasTeste: resultadoDrive.falasTeste || "",
         respostasSelecao: resultadoDrive.respostasSelecao || "",
         cortesProjeto: resultadoDrive.cortesProjeto || "",
-        Advertencia: resultadoDrive.Advertencia || "",
         entregasProjeto: resultadoDrive.entregasProjeto || "",
-        formSelecao: resultadoDrive.formSelecao || "",
-        formEntregas: resultadoDrive.formEntregas || "",
-        planilhaSelecao: resultadoDrive.planilhaSelecao || "",
-        planilhaEntregas: resultadoDrive.planilhaEntregas || "",
+        formSelecao: lerUrlForm(retornoForms?.formSelecao),
+        formEntregas: lerUrlForm(retornoForms?.formEntregas),
+        planilhaSelecao: lerUrlForm(retornoForms?.planilhaSelecao),
+        planilhaEntregas: lerUrlForm(retornoForms?.planilhaEntregas),
       };
 
       const projetoComLinks: Projeto = {
@@ -4829,6 +4905,7 @@ export default function DubworksManager() {
         String(metaProjeto.editor_email || ""),
         rascunho.Tipo || projetoPainel.Tipo || "Projeto",
         rascunho.Capa_URL || projetoPainel.Capa_URL || "",
+        projetoPainel.ID,
         extrairGoogleFolderId(linksAtuais.pasta || "")
       );
 
@@ -4840,7 +4917,6 @@ export default function DubworksManager() {
         !resultado.falasTeste &&
         !resultado.respostasSelecao &&
         !resultado.cortesProjeto &&
-        !resultado.Advertencia &&
         !resultado.entregasProjeto
       ) {
         console.error("Retorno inesperado da função do Drive:", resultado);
@@ -4861,7 +4937,6 @@ export default function DubworksManager() {
           resultado.respostasSelecao || linksAtuais.respostasSelecao || "",
         cortesProjeto:
           resultado.cortesProjeto || linksAtuais.cortesProjeto || "",
-        Advertencia: resultado.Advertencia,
         entregasProjeto:
           resultado.entregasProjeto || linksAtuais.entregasProjeto || "",
         formSelecao: resultado.formSelecao || linksAtuais.formSelecao || "",
@@ -4907,6 +4982,39 @@ export default function DubworksManager() {
       );
     } finally {
       setCriandoEstruturaDrive(false);
+    }
+  }
+
+  async function publicarIntegracaoFormsOficial() {
+    if (usuarioLogado?.cargo !== "diretoria") {
+      alert("Somente a diretoria pode publicar a integração Google Forms.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Publicar a versão oficial do Apps Script de Projetos/Forms agora?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setPublicandoIntegracaoForms(true);
+      const resultado = await publicarIntegracaoFormsProjetos();
+      alert(
+        `Integração Google Forms publicada com sucesso${
+          resultado.versionNumber ? ` (versão ${resultado.versionNumber})` : ""
+        }.`
+      );
+    } catch (erro: any) {
+      alert(
+        `Não foi possível publicar a integração Google Forms: ${
+          erro?.message || String(erro)
+        }`
+      );
+    } finally {
+      setPublicandoIntegracaoForms(false);
     }
   }
 
@@ -5247,8 +5355,23 @@ export default function DubworksManager() {
       return;
     }
 
+    let avisoFinalizacao = "";
+    if (
+      !statusProjetoFinalizado(selecionado.Status) &&
+      statusProjetoFinalizado(projetoFinalComHistorico.Status)
+    ) {
+      try {
+        await finalizarArquivosProjeto(projetoFinalComHistorico);
+      } catch (erroFinalizacao: any) {
+        avisoFinalizacao =
+          ` O status foi salvo, mas os arquivos não puderam ser movidos para 3 | Finalizado: ${
+            erroFinalizacao?.message || "erro desconhecido"
+          }`;
+      }
+    }
+
     await recarregarProjetos();
-    alert("Alterações salvas com sucesso.");
+    alert(`Alterações salvas com sucesso.${avisoFinalizacao}`);
   }
 
   async function salvarElencoAtual() {
@@ -6703,9 +6826,9 @@ export default function DubworksManager() {
   const projetoDrive = rascunho || projetoPainel;
   const driveSalvo = extrairLinksDrive(projetoDrive?.Observacoes);
 
-  const observacoesVisiveis = (projetoPainel?.Observacoes || "")
-    .replace(/\[\[DRIVE_LINKS\]\][\s\S]*?\[\[\/DRIVE_LINKS\]\]/g, "")
-    .trim();
+  const observacoesVisiveis = observacaoPublicaProjetoUI(
+    projetoPainel?.Observacoes
+  );
 
   const driveLinks: {
     chave: "pasta" | "selecao" | "projeto" | "finalizados";
@@ -7626,6 +7749,22 @@ export default function DubworksManager() {
             >
               Salvar links
             </button>
+
+            {usuarioLogado?.cargo === "diretoria" && (
+              <button
+                onClick={publicarIntegracaoFormsOficial}
+                disabled={publicandoIntegracaoForms}
+                style={{
+                  ...botaoSecundarioStyle,
+                  opacity: publicandoIntegracaoForms ? 0.7 : 1,
+                }}
+                title="Publica o Code.gs e o manifesto oficiais no Apps Script de Projetos"
+              >
+                {publicandoIntegracaoForms
+                  ? "Publicando integração..."
+                  : "Publicar integração Forms"}
+              </button>
+            )}
           </div>
         )}
       </div>

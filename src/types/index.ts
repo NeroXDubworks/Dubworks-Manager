@@ -83,7 +83,6 @@ export type DriveStructureResult = {
   falasTeste?: string;
   respostasSelecao?: string;
   cortesProjeto?: string;
-  Advertencia?: string;
   entregasProjeto?: string;
   formSelecao?: string;
   formEntregas?: string;
@@ -96,7 +95,6 @@ export type DriveStructureResult = {
   falasTesteId?: string;
   respostasSelecaoId?: string;
   cortesProjetoId?: string;
-  AdvertenciaId?: string;
   entregasProjetoId?: string;
   formSelecaoId?: string;
   formEntregasId?: string;

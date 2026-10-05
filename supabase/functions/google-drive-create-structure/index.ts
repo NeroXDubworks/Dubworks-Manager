@@ -8,6 +8,7 @@ const corsHeaders = {
 };
 
 const PROJECT_FORMS_SCRIPT_URL =
+  Deno.env.get("GOOGLE_PROJECT_FORMS_SCRIPT_URL") ||
   "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
 
 Deno.serve(async (req) => {
@@ -21,22 +22,57 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
+    const usuario = await validarUsuarioAutenticado(req);
+    const projectId = Number(body?.projectId);
+
+    if (!Number.isFinite(projectId) || projectId <= 0) {
+      throw new HttpError(
+        400,
+        "Projeto não informado para autorizar a integração do Google Drive."
+      );
+    }
+
+    const action = String(body?.action || "").trim();
+    const modoAcesso =
+      action === "ler_respostas_selecao" ||
+      action === "ler_respostas_entregas"
+        ? "view"
+        : "edit";
+
+    await exigirAcessoProjeto(projectId, usuario, modoAcesso);
 
     if (body?.action === "criar_estrutura_episodio") {
-      const GOOGLE_CLIENT_EMAIL = Deno.env.get("GOOGLE_CLIENT_EMAIL");
-      const GOOGLE_PRIVATE_KEY = Deno.env.get("GOOGLE_PRIVATE_KEY");
-
-      if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-        return json(
-          { error: "Secrets do Google Drive não configurados." },
-          500
-        );
-      }
-
-      const jwt = await createJWT(GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY);
-      const accessToken = await getAccessToken(jwt);
+      const accessToken = await obterGoogleDriveAccessToken();
       const resultado = await criarEstruturaEpisodio(body, accessToken);
       return json(resultado, 200);
+    }
+
+    if (body?.action === "finalizar_episodio") {
+      const accessToken = await obterGoogleDriveAccessToken();
+      const origemId = extrairId(body?.pastaDriveId || body?.origemId);
+      const destinoId = extrairId(body?.pastaFinalizadoId || body?.destinoId);
+      if (!origemId || !destinoId) {
+        return json(
+          { error: "Pastas de origem e destino do episódio não informadas." },
+          400
+        );
+      }
+      const movidos = await moverConteudoPasta(origemId, destinoId, accessToken);
+      return json({ ok: true, movidos, origemId, destinoId }, 200);
+    }
+
+    if (body?.action === "reabrir_episodio") {
+      const accessToken = await obterGoogleDriveAccessToken();
+      const origemId = extrairId(body?.pastaFinalizadoId || body?.origemId);
+      const destinoId = extrairId(body?.pastaDriveId || body?.destinoId);
+      if (!origemId || !destinoId) {
+        return json(
+          { error: "Pastas de origem e destino do episódio não informadas." },
+          400
+        );
+      }
+      const movidos = await moverConteudoPasta(origemId, destinoId, accessToken);
+      return json({ ok: true, movidos, origemId, destinoId }, 200);
     }
 
     // Mantém a compatibilidade de leitura das respostas. Esta integração usa
@@ -52,7 +88,10 @@ Deno.serve(async (req) => {
         );
       }
 
-      const resultado = await chamarAppsScript(body);
+      const resultado = await chamarAppsScript({
+        ...body,
+        access_token: usuario.token,
+      });
       return json(resultado, 200);
     }
 
@@ -66,19 +105,16 @@ Deno.serve(async (req) => {
       return json({ error: "Nome do projeto ausente." }, 400);
     }
 
-    const GOOGLE_CLIENT_EMAIL = Deno.env.get("GOOGLE_CLIENT_EMAIL");
-    const GOOGLE_PRIVATE_KEY = Deno.env.get("GOOGLE_PRIVATE_KEY");
     const ROOT_FOLDER_ID = Deno.env.get("GOOGLE_DRIVE_ROOT_FOLDER_ID");
 
-    if (!GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !ROOT_FOLDER_ID) {
+    if (!ROOT_FOLDER_ID) {
       return json(
-        { error: "Secrets principais do Google Drive não configurados." },
+        { error: "Pasta raiz do Google Drive não configurada." },
         500
       );
     }
 
-    const jwt = await createJWT(GOOGLE_CLIENT_EMAIL, GOOGLE_PRIVATE_KEY);
-    const accessToken = await getAccessToken(jwt);
+    const accessToken = await obterGoogleDriveAccessToken();
 
     let pastaProjeto: DriveFolder;
 
@@ -196,17 +232,6 @@ Deno.serve(async (req) => {
       "Cortes Projeto"
     );
 
-    const advertencia = await obterOuCriarPasta(
-      [
-        "Advertência",
-        "2.2 | Advertência",
-        "[Projeto] Advertência",
-      ],
-      pastaProjetoInterna.id,
-      accessToken,
-      "Advertência"
-    );
-
     const entregasProjeto = await obterOuCriarPasta(
       [
         "Entregas Projeto",
@@ -246,23 +271,248 @@ Deno.serve(async (req) => {
         cortesProjeto: cortesProjeto.webViewLink,
         cortesProjetoId: cortesProjeto.id,
 
-        Advertencia: advertencia.webViewLink,
-        AdvertenciaId: advertencia.id,
-
         entregasProjeto: entregasProjeto.webViewLink,
         entregasProjetoId: entregasProjeto.id,
 
         // Forms ficam deliberadamente fora desta Edge Function.
-        // driveFormsBootstrapV2 -> /api/forms-copy é o único criador/sincronizador.
+        // O frontend orquestra explicitamente a sincronização via /api/forms-copy.
         formsDelegadosAoProxy: true,
       },
       200
     );
   } catch (err) {
     console.error("Erro google-drive-create-structure:", err);
-    return json({ error: String((err as any)?.message || err) }, 500);
+    const status =
+      err instanceof HttpError && Number.isFinite(err.status) ? err.status : 500;
+    return json({ error: String((err as any)?.message || err) }, status);
   }
 });
+
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function obterPublishableKey() {
+  try {
+    const chaves = JSON.parse(Deno.env.get("SUPABASE_PUBLISHABLE_KEYS") || "{}");
+    if (chaves?.default) return String(chaves.default);
+  } catch {
+    // fallback para projetos ainda compatíveis com a chave anon legada.
+  }
+  return Deno.env.get("SUPABASE_ANON_KEY") || "";
+}
+
+type UsuarioAutenticado = {
+  token: string;
+  id: string;
+  email: string;
+};
+
+async function validarUsuarioAutenticado(
+  req: Request
+): Promise<UsuarioAutenticado> {
+  const authorization = String(req.headers.get("Authorization") || "").trim();
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+
+  if (!token || token.startsWith("sb_")) {
+    throw new HttpError(401, "Sessão de usuário obrigatória.");
+  }
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const publishableKey = obterPublishableKey();
+
+  if (!supabaseUrl || !publishableKey) {
+    throw new HttpError(500, "Configuração de autenticação do Supabase ausente.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: publishableKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new HttpError(401, "Sessão inválida ou expirada.");
+  }
+
+  const user = await response.json().catch(() => null);
+  const email = String(user?.email || "").trim();
+
+  if (!user?.id || !email) {
+    throw new HttpError(401, "Usuário autenticado não identificado.");
+  }
+
+  return {
+    token,
+    id: String(user.id),
+    email,
+  };
+}
+
+function normalizarAcesso(valor: unknown) {
+  return String(valor || "")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+}
+
+async function exigirAcessoProjeto(
+  projectId: number,
+  usuario: UsuarioAutenticado,
+  modo: "view" | "edit"
+) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const publishableKey = obterPublishableKey();
+
+  if (!supabaseUrl || !publishableKey) {
+    throw new HttpError(500, "Configuração de autorização do Supabase ausente.");
+  }
+
+  const headers = {
+    Authorization: `Bearer ${usuario.token}`,
+    apikey: publishableKey,
+  };
+
+  const projetoParams = new URLSearchParams({
+    select: "id,lider,editor",
+    id: `eq.${projectId}`,
+    limit: "1",
+  });
+  const projetoResp = await fetch(
+    `${supabaseUrl}/rest/v1/projetos?${projetoParams.toString()}`,
+    { headers }
+  );
+  const projetos = await projetoResp.json().catch(() => []);
+
+  if (!projetoResp.ok || !Array.isArray(projetos) || !projetos[0]) {
+    throw new HttpError(403, "Você não possui acesso a este projeto.");
+  }
+
+  if (modo === "view") return;
+
+  const perfilParams = new URLSearchParams({
+    select: "cargo,nome,login,vinculo",
+    login: `ilike.${usuario.email}`,
+    limit: "1",
+  });
+  const perfilResp = await fetch(
+    `${supabaseUrl}/rest/v1/usuarios?${perfilParams.toString()}`,
+    { headers }
+  );
+  const perfis = await perfilResp.json().catch(() => []);
+  const perfil =
+    perfilResp.ok && Array.isArray(perfis) && perfis.length ? perfis[0] : null;
+
+  if (!perfil) {
+    throw new HttpError(
+      403,
+      "Seu perfil do DubWorks Manager não foi encontrado."
+    );
+  }
+
+  const projeto = projetos[0];
+  const cargo = normalizarAcesso(perfil.cargo);
+  const identidades = new Set(
+    [perfil.vinculo, perfil.login, perfil.nome]
+      .map(normalizarAcesso)
+      .filter(Boolean)
+  );
+
+  const permitido =
+    cargo === "diretoria" ||
+    cargo === "adm" ||
+    ((cargo === "lider" || cargo === "lider_treinamento") &&
+      identidades.has(normalizarAcesso(projeto.lider))) ||
+    (cargo === "editor" &&
+      identidades.has(normalizarAcesso(projeto.editor)));
+
+  if (!permitido) {
+    throw new HttpError(
+      403,
+      "Você não possui permissão para alterar a estrutura deste projeto."
+    );
+  }
+}
+
+async function obterGoogleDriveAccessToken() {
+  const email = Deno.env.get("GOOGLE_CLIENT_EMAIL");
+  const privateKey = Deno.env.get("GOOGLE_PRIVATE_KEY");
+
+  if (!email || !privateKey) {
+    throw new HttpError(500, "Secrets do Google Drive não configurados.");
+  }
+
+  const jwt = await createJWT(email, privateKey);
+  return getAccessToken(jwt);
+}
+
+async function moverConteudoPasta(
+  origemId: string,
+  destinoId: string,
+  token: string
+) {
+  if (origemId === destinoId) return 0;
+
+  const q = `'${escaparDriveQuery(origemId)}' in parents and trashed = false`;
+  let pageToken = "";
+  let movidos = 0;
+
+  do {
+    const params = new URLSearchParams({
+      q,
+      fields: "nextPageToken,files(id,name)",
+      pageSize: "1000",
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const lista = await fetch(
+      `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = await lista.json();
+
+    if (!lista.ok) {
+      throw new Error(
+        data?.error?.message || "Não foi possível listar os arquivos do episódio."
+      );
+    }
+
+    for (const item of data.files || []) {
+      const paramsMover = new URLSearchParams({
+        addParents: destinoId,
+        removeParents: origemId,
+        supportsAllDrives: "true",
+        fields: "id,parents",
+      });
+      const mover = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${item.id}?${paramsMover.toString()}`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const moverData = await mover.json().catch(() => null);
+      if (!mover.ok) {
+        throw new Error(
+          moverData?.error?.message ||
+            `Não foi possível mover ${item.name || item.id} para a pasta final.`
+        );
+      }
+      movidos += 1;
+    }
+
+    pageToken = String(data.nextPageToken || "");
+  } while (pageToken);
+
+  return movidos;
+}
 
 type DriveFolder = {
   id: string;

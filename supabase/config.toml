@@ -1,0 +1,10 @@
+project_id = "omgjbafqukpzdhhpdlaa"
+
+# Both functions are user-facing privileged integrations.
+# Platform JWT verification stays enabled and each handler also validates
+# the authenticated user explicitly before using Google credentials.
+[functions.google-drive-create-structure]
+verify_jwt = true
+
+[functions.apps-script-project-installer]
+verify_jwt = true

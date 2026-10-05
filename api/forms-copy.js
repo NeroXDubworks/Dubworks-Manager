@@ -1,40 +1,14 @@
+import { ApiAuthError, exigirAcessoProjeto } from "./_shared/projectAuth.js";
+import { PROJECT_FORMS_SCRIPT_URL } from "./_shared/runtimeConfig.js";
+
 export const config = {
   maxDuration: 300,
 };
-
-const FORMS_COPIER_URL =
-  "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
-
-const SUPABASE_URL = "https://omgjbafqukpzdhhpdlaa.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY =
-  "sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT";
 
 function responder(res, status, payload) {
   res.status(status);
   res.setHeader("Cache-Control", "no-store");
   return res.json(payload);
-}
-
-async function validarSessao(req) {
-  const authorization = String(req.headers.authorization || "").trim();
-
-  if (!authorization.toLowerCase().startsWith("bearer ")) {
-    return false;
-  }
-
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: authorization,
-    },
-  });
-
-  return response.ok;
-}
-
-function extrairAccessToken(req) {
-  const authorization = String(req.headers.authorization || "").trim();
-  return authorization.replace(/^Bearer\s+/i, "").trim();
 }
 
 function lerBody(req) {
@@ -103,17 +77,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const sessaoValida = await validarSessao(req);
-
-    if (!sessaoValida) {
-      return responder(res, 401, {
-        ok: false,
-        error: "Sessão inválida ou expirada. Entre novamente no DubWorks Manager.",
-      });
-    }
-
-    const accessToken = extrairAccessToken(req);
     const body = lerBody(req);
+    const projectId = String(body?.projectId || "").trim();
+    const auth = await exigirAcessoProjeto(req, projectId, "edit");
+    const accessToken = auth.token;
     const projectName = String(body?.projectName || "").trim();
     const respostasSelecaoFolderId = String(
       body?.respostasSelecaoFolderId || ""
@@ -142,17 +109,8 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!personagens.length) {
-      return responder(res, 400, {
-        ok: false,
-        error:
-          "Nenhum personagem marcado como Em seleção foi recebido. O formulário não será criado com “A definir”.",
-      });
-    }
-
     const capaUrl = String(body?.capaUrl || "").trim();
     const projectType = String(body?.projectType || "Projeto").trim() || "Projeto";
-    const projectId = String(body?.projectId || "").trim();
     const existingSelectionFormId = String(
       body?.existingSelectionFormId || body?.formSelecaoId || body?.formSelecao || ""
     ).trim();
@@ -169,7 +127,7 @@ export default async function handler(req, res) {
     let response;
 
     try {
-      response = await fetch(FORMS_COPIER_URL, {
+      response = await fetch(PROJECT_FORMS_SCRIPT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "text/plain;charset=utf-8",
@@ -251,6 +209,10 @@ export default async function handler(req, res) {
       totalPersonagensEnviados: personagensSelecao.length,
     });
   } catch (erro) {
+    if (erro instanceof ApiAuthError) {
+      return responder(res, erro.status, { ok: false, error: erro.message });
+    }
+
     console.error("Erro no proxy de formulários:", erro);
 
     const mensagem =

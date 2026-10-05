@@ -60,6 +60,11 @@ export type SelecaoVaga = {
   criada_em?: string | null;
 };
 
+export type EscopoAprovacaoSelecao =
+  | "somente_episodio"
+  | "a_partir_episodio"
+  | "projeto_diante";
+
 export type EpisodioHistorico = {
   id: number;
   projeto_id: number;
@@ -80,6 +85,7 @@ function projetoNumero(projetoId: string | number) {
 }
 
 export async function criarEstruturaDriveEpisodio(params: {
+  projectId: string | number;
   projectFolderId: string;
   finalizadosFolderId: string;
   numero: number;
@@ -90,6 +96,7 @@ export async function criarEstruturaDriveEpisodio(params: {
     {
       body: {
         action: "criar_estrutura_episodio",
+        projectId: params.projectId,
         projectFolderId: params.projectFolderId,
         finalizadosFolderId: params.finalizadosFolderId,
         numero: params.numero,
@@ -116,6 +123,61 @@ export async function criarEstruturaDriveEpisodio(params: {
     finalizadoId: string;
     finalizado: string;
   };
+}
+
+async function moverEstruturaDriveEpisodio(
+  action: "finalizar_episodio" | "reabrir_episodio",
+  episodio: ProjetoEpisodio
+) {
+  if (!episodio.pasta_drive_id || !episodio.pasta_finalizado_id) {
+    return { ok: true, movidos: 0, legadoSemPastas: true };
+  }
+
+  const { data, error } = await supabase.functions.invoke(
+    "google-drive-create-structure",
+    {
+      body: {
+        action,
+        projectId: episodio.projeto_id,
+        pastaDriveId: episodio.pasta_drive_id,
+        pastaFinalizadoId: episodio.pasta_finalizado_id,
+      },
+    }
+  );
+
+  if (error) throw error;
+  if (!data || data.error || data.ok === false) {
+    throw new Error(
+      String(
+        data?.error ||
+          data?.message ||
+          "Não foi possível mover os arquivos do episódio no Google Drive."
+      )
+    );
+  }
+
+  return data;
+}
+
+export async function iniciarProducaoEpisodio(
+  episodio: ProjetoEpisodio,
+  usuario?: string
+) {
+  const atualizado = await atualizarEpisodioProjeto(episodio.id, {
+    status: "em_producao",
+    data_inicio:
+      episodio.data_inicio || new Date().toISOString().slice(0, 10),
+  });
+
+  await registrarHistoricoEpisodio({
+    projetoId: episodio.projeto_id,
+    episodioId: episodio.id,
+    tipo: "producao_iniciada",
+    descricao: "Produção do episódio iniciada.",
+    usuario,
+  });
+
+  return atualizado;
 }
 
 export async function carregarEpisodiosProjeto(
@@ -210,6 +272,10 @@ export async function finalizarEpisodioProjeto(params: {
   const dataConclusao =
     params.dataConclusao || new Date().toISOString().slice(0, 10);
 
+  if (!params.legado) {
+    await moverEstruturaDriveEpisodio("finalizar_episodio", params.episodio);
+  }
+
   const atualizado = await atualizarEpisodioProjeto(params.episodio.id, {
     status: "finalizado",
     data_conclusao: dataConclusao,
@@ -237,6 +303,10 @@ export async function reabrirEpisodioProjeto(
   episodio: ProjetoEpisodio,
   usuario?: string
 ) {
+  if (!episodio.registro_legado) {
+    await moverEstruturaDriveEpisodio("reabrir_episodio", episodio);
+  }
+
   const atualizado = await atualizarEpisodioProjeto(episodio.id, {
     status: "em_producao",
     data_conclusao: null,
@@ -271,6 +341,7 @@ export async function adicionarElencoAoEpisodio(params: {
   projetoId: string | number;
   episodioId: number;
   item: ElencoItem;
+  usuario?: string;
 }) {
   const elencoId = Number(params.item.id);
   const payload = {
@@ -292,16 +363,42 @@ export async function adicionarElencoAoEpisodio(params: {
     .single();
 
   if (error) throw error;
+
+  await registrarHistoricoEpisodio({
+    projetoId: params.projetoId,
+    episodioId: params.episodioId,
+    tipo: "elenco_adicionado",
+    descricao: "Personagem " + payload.personagem + " adicionado ao episódio.",
+    usuario: params.usuario,
+    dados: { personagem: payload.personagem, dublador: payload.dublador },
+  });
+
   return data as EpisodioElenco;
 }
 
-export async function removerElencoDoEpisodio(episodioElencoId: number) {
+export async function removerElencoDoEpisodio(params: {
+  episodioElencoId: number;
+  projetoId: string | number;
+  episodioId: number;
+  personagem?: string;
+  usuario?: string;
+}) {
   const { error } = await supabase
     .from("episodio_elenco")
     .delete()
-    .eq("id", episodioElencoId);
+    .eq("id", params.episodioElencoId);
 
   if (error) throw error;
+
+  await registrarHistoricoEpisodio({
+    projetoId: params.projetoId,
+    episodioId: params.episodioId,
+    tipo: "elenco_removido",
+    descricao:
+      "Personagem " + (params.personagem || "sem identificação") + " removido do episódio.",
+    usuario: params.usuario,
+    dados: { personagem: params.personagem || null },
+  });
 }
 
 export async function carregarEntregasEpisodio(
@@ -372,6 +469,244 @@ export async function abrirSelecaoEmergencial(params: {
   });
 
   return data as SelecaoVaga;
+}
+
+export async function marcarSelecaoEmAvaliacao(params: {
+  vaga: SelecaoVaga;
+  usuario?: string;
+}) {
+  const { data, error } = await supabase
+    .from("selecao_vagas")
+    .update({ status: "avaliacao" })
+    .eq("id", params.vaga.id)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+
+  if (params.vaga.episodio_id) {
+    await registrarHistoricoEpisodio({
+      projetoId: params.vaga.projeto_id,
+      episodioId: params.vaga.episodio_id,
+      tipo: "selecao_em_avaliacao",
+      descricao:
+        "Seleção de " + params.vaga.personagem + " movida para avaliação.",
+      usuario: params.usuario,
+    });
+  }
+
+  return data as SelecaoVaga;
+}
+
+export async function encerrarSelecaoSemSubstituicao(params: {
+  vaga: SelecaoVaga;
+  usuario?: string;
+}) {
+  const { data, error } = await supabase
+    .from("selecao_vagas")
+    .update({ status: "encerrada", escopo_aprovacao: null })
+    .eq("id", params.vaga.id)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+
+  if (params.vaga.episodio_id) {
+    await registrarHistoricoEpisodio({
+      projetoId: params.vaga.projeto_id,
+      episodioId: params.vaga.episodio_id,
+      tipo: "selecao_encerrada_sem_substituicao",
+      descricao:
+        "Seleção de " +
+        params.vaga.personagem +
+        " encerrada sem substituição aprovada.",
+      usuario: params.usuario,
+    });
+  }
+
+  return data as SelecaoVaga;
+}
+
+export async function aprovarSelecaoEmergencial(params: {
+  vaga: SelecaoVaga;
+  dublador: string;
+  telefone?: string;
+  escopo: EscopoAprovacaoSelecao;
+  usuario?: string;
+}) {
+  const dublador = String(params.dublador || "").trim();
+  const telefone = String(params.telefone || "").trim();
+  const personagem = String(params.vaga.personagem || "").trim();
+
+  if (!dublador) throw new Error("Informe o dublador aprovado.");
+  if (!personagem) throw new Error("A vaga não possui personagem.");
+  if (!params.vaga.episodio_id) {
+    throw new Error("A seleção emergencial não está vinculada a um episódio.");
+  }
+
+  const { data: episodioAtual, error: erroEpisodio } = await supabase
+    .from("projeto_episodios")
+    .select("id,numero")
+    .eq("id", params.vaga.episodio_id)
+    .eq("projeto_id", params.vaga.projeto_id)
+    .single();
+
+  if (erroEpisodio || !episodioAtual) {
+    throw erroEpisodio || new Error("Episódio da seleção não encontrado.");
+  }
+
+  const { data: linhaAtual, error: erroLinhaAtual } = await supabase
+    .from("episodio_elenco")
+    .select("id,elenco_id,personagem,dublador,telefone")
+    .eq("id", params.vaga.episodio_elenco_id || -1)
+    .maybeSingle();
+
+  if (erroLinhaAtual) throw erroLinhaAtual;
+
+  const dubladorAnterior = String(linhaAtual?.dublador || "").trim();
+  const telefoneAnterior = String(linhaAtual?.telefone || "").trim();
+
+  let episodiosAlvo = [Number(params.vaga.episodio_id)];
+
+  if (params.escopo !== "somente_episodio") {
+    const { data: futuros, error: erroFuturos } = await supabase
+      .from("projeto_episodios")
+      .select("id,numero")
+      .eq("projeto_id", params.vaga.projeto_id)
+      .gte("numero", Number(episodioAtual.numero));
+
+    if (erroFuturos) throw erroFuturos;
+    episodiosAlvo = (futuros || []).map((item: any) => Number(item.id));
+  }
+
+  const { data: elencoEpisodios, error: erroElencoEpisodios } = await supabase
+    .from("episodio_elenco")
+    .select("id,episodio_id,personagem,elenco_id")
+    .eq("projeto_id", params.vaga.projeto_id)
+    .in("episodio_id", episodiosAlvo);
+
+  if (erroElencoEpisodios) throw erroElencoEpisodios;
+
+  const normalizarPersonagem = (valor: unknown) =>
+    String(valor || "")
+      .trim()
+      .toLocaleLowerCase("pt-BR");
+
+  const idsAlvo = (elencoEpisodios || [])
+    .filter(
+      (item: any) =>
+        normalizarPersonagem(item.personagem) ===
+        normalizarPersonagem(personagem)
+    )
+    .map((item: any) => Number(item.id));
+
+  if (
+    params.vaga.episodio_elenco_id &&
+    !idsAlvo.includes(Number(params.vaga.episodio_elenco_id))
+  ) {
+    idsAlvo.push(Number(params.vaga.episodio_elenco_id));
+  }
+
+  if (!idsAlvo.length) {
+    throw new Error(
+      "Não encontrei o personagem no elenco do episódio para aplicar a substituição."
+    );
+  }
+
+  const substituiElencoId =
+    Number(params.vaga.dublador_anterior_id || linhaAtual?.elenco_id || 0) ||
+    null;
+
+  const { error: erroAtualizarEpisodios } = await supabase
+    .from("episodio_elenco")
+    .update({
+      dublador,
+      telefone: telefone || null,
+      status: "pendente",
+      substitui_elenco_id: substituiElencoId,
+      atualizado_em: new Date().toISOString(),
+    })
+    .in("id", idsAlvo);
+
+  if (erroAtualizarEpisodios) throw erroAtualizarEpisodios;
+
+  if (params.escopo === "projeto_diante") {
+    let elencoProjetoId = substituiElencoId;
+
+    if (!elencoProjetoId) {
+      const { data: candidatos, error: erroCandidatos } = await supabase
+        .from("elenco")
+        .select("id,personagem")
+        .eq("projeto_id", params.vaga.projeto_id)
+        .eq("ativo", true);
+
+      if (erroCandidatos) throw erroCandidatos;
+
+      const encontrado = (candidatos || []).find(
+        (item: any) =>
+          normalizarPersonagem(item.personagem) ===
+          normalizarPersonagem(personagem)
+      );
+      elencoProjetoId = encontrado ? Number(encontrado.id) : null;
+    }
+
+    if (!elencoProjetoId) {
+      throw new Error(
+        "Não encontrei o personagem no Banco do Projeto para aplicar o novo dublador."
+      );
+    }
+
+    const { error: erroBancoProjeto } = await supabase
+      .from("elenco")
+      .update({
+        dublador,
+        telefone_dublador: telefone,
+      })
+      .eq("id", elencoProjetoId)
+      .eq("projeto_id", params.vaga.projeto_id)
+      .eq("ativo", true);
+
+    if (erroBancoProjeto) throw erroBancoProjeto;
+  }
+
+  const { data: vagaAtualizada, error: erroVaga } = await supabase
+    .from("selecao_vagas")
+    .update({
+      status: "encerrada",
+      escopo_aprovacao: params.escopo,
+    })
+    .eq("id", params.vaga.id)
+    .select("*")
+    .single();
+
+  if (erroVaga) throw erroVaga;
+
+  await registrarHistoricoEpisodio({
+    projetoId: params.vaga.projeto_id,
+    episodioId: params.vaga.episodio_id,
+    tipo: "substituicao_aprovada",
+    descricao:
+      "Substituição aprovada para " +
+      personagem +
+      ": " +
+      (dubladorAnterior || "sem dublador anterior") +
+      " → " +
+      dublador +
+      ".",
+    usuario: params.usuario,
+    dados: {
+      vaga_id: params.vaga.id,
+      personagem,
+      dublador_anterior: dubladorAnterior || null,
+      telefone_anterior: telefoneAnterior || null,
+      dublador_aprovado: dublador,
+      telefone_aprovado: telefone || null,
+      escopo: params.escopo,
+      episodios_afetados: episodiosAlvo,
+    },
+  });
+
+  return vagaAtualizada as SelecaoVaga;
 }
 
 export async function carregarHistoricoEpisodio(
