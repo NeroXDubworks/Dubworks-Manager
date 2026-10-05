@@ -1,3 +1,4 @@
+import { ApiAuthError, exigirAcessoProjeto } from "./_shared/projectAuth.js";
 import {
   PROJECT_FORMS_SCRIPT_URL,
   SUPABASE_PUBLISHABLE_KEY,
@@ -28,23 +29,6 @@ function lerBody(req) {
   return null;
 }
 
-async function validarSessao(req) {
-  const authorization = String(req.headers.authorization || "").trim();
-
-  if (!authorization.toLowerCase().startsWith("bearer ")) {
-    return false;
-  }
-
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: authorization,
-    },
-  });
-
-  return response.ok;
-}
-
 function extrairAccessToken(req) {
   const authorization = String(req.headers.authorization || "").trim();
   return authorization.replace(/^Bearer\s+/i, "").trim();
@@ -57,18 +41,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const sessaoValida = await validarSessao(req);
-
-    if (!sessaoValida) {
-      return responder(res, 401, {
-        ok: false,
-        error: "Sessão inválida ou expirada. Entre novamente no DubWorks Manager.",
-      });
-    }
-
-    const accessToken = extrairAccessToken(req);
     const body = lerBody(req);
     const projectId = String(body?.projectId || "").trim();
+    const auth = await exigirAcessoProjeto(req, projectId, "edit");
+    const accessToken = auth.token;
     const projectName = String(body?.projectName || "").trim();
     const projetoFolderId = String(body?.projetoFolderId || "").trim();
     const finalizadosFolderId = String(body?.finalizadosFolderId || "").trim();
@@ -161,6 +137,10 @@ export default async function handler(req, res) {
       ...data,
     });
   } catch (erro) {
+    if (erro instanceof ApiAuthError) {
+      return responder(res, erro.status, { ok: false, error: erro.message });
+    }
+
     console.error("Erro ao finalizar arquivos do projeto:", erro);
 
     const mensagem =
