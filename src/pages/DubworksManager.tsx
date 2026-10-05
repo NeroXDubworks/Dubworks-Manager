@@ -59,6 +59,7 @@ import {
   mapMembroDb,
   criarEstruturaDriveViaFunction,
   criarAtualizarFormulariosProjeto,
+  publicarIntegracaoFormsProjetos,
   finalizarArquivosProjeto,
   extrairGoogleFileId,
   extrairGoogleFolderId,
@@ -414,6 +415,8 @@ export default function DubworksManager() {
     useState<ElencoItem>(elencoVazio);
   const [criandoEstruturaDrive, setCriandoEstruturaDrive] = useState(false);
   const [sincronizandoFormulariosProjeto, setSincronizandoFormulariosProjeto] =
+    useState(false);
+  const [publicandoIntegracaoForms, setPublicandoIntegracaoForms] =
     useState(false);
   const [respostasSelecao, setRespostasSelecao] = useState<RespostaSelecao[]>(
     []
@@ -4982,6 +4985,39 @@ export default function DubworksManager() {
     }
   }
 
+  async function publicarIntegracaoFormsOficial() {
+    if (usuarioLogado?.cargo !== "diretoria") {
+      alert("Somente a diretoria pode publicar a integração Google Forms.");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        "Publicar a versão oficial do Apps Script de Projetos/Forms agora?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setPublicandoIntegracaoForms(true);
+      const resultado = await publicarIntegracaoFormsProjetos();
+      alert(
+        `Integração Google Forms publicada com sucesso${
+          resultado.versionNumber ? ` (versão ${resultado.versionNumber})` : ""
+        }.`
+      );
+    } catch (erro: any) {
+      alert(
+        `Não foi possível publicar a integração Google Forms: ${
+          erro?.message || String(erro)
+        }`
+      );
+    } finally {
+      setPublicandoIntegracaoForms(false);
+    }
+  }
+
   async function criarAtualizarFormulariosProjetoAtual() {
     if (!rascunho || !projetoPainel) return;
 
@@ -7713,6 +7749,22 @@ export default function DubworksManager() {
             >
               Salvar links
             </button>
+
+            {usuarioLogado?.cargo === "diretoria" && (
+              <button
+                onClick={publicarIntegracaoFormsOficial}
+                disabled={publicandoIntegracaoForms}
+                style={{
+                  ...botaoSecundarioStyle,
+                  opacity: publicandoIntegracaoForms ? 0.7 : 1,
+                }}
+                title="Publica o Code.gs e o manifesto oficiais no Apps Script de Projetos"
+              >
+                {publicandoIntegracaoForms
+                  ? "Publicando integração..."
+                  : "Publicar integração Forms"}
+              </button>
+            )}
           </div>
         )}
       </div>
