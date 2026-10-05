@@ -13,12 +13,15 @@ const SCRIPT_ID =
 const DEPLOYMENT_ID =
   Deno.env.get("GOOGLE_PROJECT_FORMS_DEPLOYMENT_ID") ||
   "AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN";
+const FORMS_SOURCE_REF =
+  Deno.env.get("GOOGLE_PROJECT_FORMS_SOURCE_REF") ||
+  "f01ed7d962ced3b29256d2166ba64269eb4b93fa";
 const RAW_CODE_URL =
   Deno.env.get("GOOGLE_PROJECT_FORMS_SOURCE_URL") ||
-  "https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/main/integracoes/google-forms-projetos/Code.gs";
+  `https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/${FORMS_SOURCE_REF}/integracoes/google-forms-projetos/Code.gs`;
 const RAW_MANIFEST_URL =
   Deno.env.get("GOOGLE_PROJECT_FORMS_MANIFEST_URL") ||
-  "https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/main/integracoes/google-forms-projetos/appsscript.json";
+  `https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/${FORMS_SOURCE_REF}/integracoes/google-forms-projetos/appsscript.json`;
 
 class HttpError extends Error {
   status: number;
