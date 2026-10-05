@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabase";
-import { FORMS_COPIER_URL, permissoesDisponiveis } from "../config/appConfig";
+import { permissoesDisponiveis } from "../config/appConfig";
 import type {
   AvaliacaoSelecao,
   Cargo,
@@ -1886,6 +1886,45 @@ export function assinarNotificacoes(
   };
 }
 
+async function invocarIntegracaoDrive<T = any>(body: Record<string, unknown>): Promise<T> {
+  const {
+    data: { session },
+    error: erroSessao,
+  } = await supabase.auth.getSession();
+
+  if (erroSessao || !session?.access_token) {
+    throw new Error("Sua sessão expirou. Entre novamente no DubWorks Manager.");
+  }
+
+  const { data, error } = await supabase.functions.invoke(
+    "google-drive-create-structure",
+    { body }
+  );
+
+  if (error) {
+    console.error("Erro da Edge Function Google Drive:", error);
+    throw new Error(
+      error.message || "Não foi possível executar a integração com o Google Drive."
+    );
+  }
+
+  if (!data) {
+    throw new Error("A Edge Function não retornou dados.");
+  }
+
+  if ((data as any).error || (data as any).ok === false) {
+    throw new Error(
+      String(
+        (data as any).error ||
+          (data as any).message ||
+          "A integração com o Google Drive retornou erro."
+      )
+    );
+  }
+
+  return data as T;
+}
+
 export async function criarEstruturaDriveViaFunction(
   projetoNome: string,
   leaderEmail = "",
@@ -1894,106 +1933,15 @@ export async function criarEstruturaDriveViaFunction(
   capaUrl = "",
   existingFolderId = ""
 ): Promise<DriveStructureResult> {
-  const response = await fetch(
-    "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: "sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT",
-        Authorization: "Bearer sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT",
-      },
-      body: JSON.stringify({
-        projectName: projetoNome,
-        projectType,
-        leaderEmail,
-        editorEmail,
-        capaUrl,
-        existingFolderId,
-        folders: ["1 | Seleção", "2 | Projeto", "3 | Finalizado"],
-      }),
-    }
-  );
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    console.error("Erro da Edge Function Google Drive:", data);
-    throw new Error(
-      data?.error ||
-        data?.message ||
-        `Edge Function retornou erro HTTP ${response.status}`
-    );
-  }
-
-  if (!data) {
-    throw new Error("A Edge Function não retornou dados.");
-  }
-
-  if (data.error) {
-    console.error("Erro retornado pela Edge Function:", data);
-    throw new Error(String(data.error));
-  }
-
-  return data as DriveStructureResult;
-}
-
-export async function copiarFormulariosViaAppsScript(
-  projetoNome: string,
-  respostasSelecaoFolderId?: string,
-  entregasFolderId?: string
-): Promise<Partial<DriveStructureResult>> {
-  if (!respostasSelecaoFolderId || !entregasFolderId) {
-    console.warn("Pastas para formulários ausentes:", {
-      respostasSelecaoFolderId,
-      entregasFolderId,
-    });
-    return {};
-  }
-
-  const response = await fetch(FORMS_COPIER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "text/plain;charset=utf-8",
-    },
-    body: JSON.stringify({
-      projectName: projetoNome,
-      respostasSelecaoFolderId,
-      entregasFolderId,
-    }),
+  return invocarIntegracaoDrive<DriveStructureResult>({
+    projectName: projetoNome,
+    projectType,
+    leaderEmail,
+    editorEmail,
+    capaUrl,
+    existingFolderId,
+    folders: ["1 | Seleção", "2 | Projeto", "3 | Finalizado"],
   });
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    console.error("Erro ao chamar Apps Script dos formulários:", data);
-    throw new Error(
-      data?.error ||
-        data?.message ||
-        `Apps Script retornou erro HTTP ${response.status}`
-    );
-  }
-
-  if (!data) {
-    throw new Error("O Apps Script não retornou dados.");
-  }
-
-  if (data.error) {
-    console.error("Erro retornado pelo Apps Script:", data);
-    throw new Error(String(data.error));
-  }
-
-  return {
-    formSelecao: data.formSelecao?.editUrl || data.formSelecao?.viewUrl || "",
-    formSelecaoId: data.formSelecao?.id || "",
-    formEntregas:
-      data.formEntregas?.editUrl || data.formEntregas?.viewUrl || "",
-    formEntregasId: data.formEntregas?.id || "",
-    planilhaSelecao: data.planilhaSelecao?.url || "",
-    planilhaSelecaoId: data.planilhaSelecao?.id || "",
-    planilhaEntregas: data.planilhaEntregas?.url || "",
-    planilhaEntregasId: data.planilhaEntregas?.id || "",
-  };
 }
 
 export async function criarAtualizarFormulariosProjeto(params: {
@@ -2022,12 +1970,6 @@ export async function criarAtualizarFormulariosProjeto(params: {
   if (!params.respostasSelecaoFolderId || !params.entregasFolderId) {
     throw new Error(
       "Não encontrei as pastas de Seleção - Respostas e Entregas do projeto."
-    );
-  }
-
-  if (!params.personagensSelecao.length) {
-    throw new Error(
-      "Nenhum personagem está marcado como Em seleção. Marque ao menos um antes de atualizar o Form de Seleção."
     );
   }
 
@@ -2120,42 +2062,11 @@ export async function lerRespostasSelecaoViaAppsScript(
     );
   }
 
-  const response = await fetch(
-    "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: "sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT",
-        Authorization: "Bearer sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT",
-      },
-      body: JSON.stringify({
-        action: "ler_respostas_selecao",
-        spreadsheetId,
-        folderId,
-      }),
-    }
-  );
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    console.error("Erro ao ler respostas pela Edge Function:", data);
-    throw new Error(
-      data?.error ||
-        data?.message ||
-        `Edge Function retornou erro HTTP ${response.status}`
-    );
-  }
-
-  if (!data) {
-    throw new Error("A Edge Function não retornou dados.");
-  }
-
-  if (data.error) {
-    console.error("Erro retornado pela Edge Function:", data);
-    throw new Error(String(data.error));
-  }
+  const data = await invocarIntegracaoDrive<any>({
+    action: "ler_respostas_selecao",
+    spreadsheetId,
+    folderId,
+  });
 
   return (data.respostas || []).map((item: any, index: number) => ({
     id: String(item.id || item.linha || index + 1),
@@ -2231,36 +2142,11 @@ export async function lerRespostasEntregasViaEdge(
     );
   }
 
-  const response = await fetch(
-    "https://omgjbafqukpzdhhpdlaa.supabase.co/functions/v1/google-drive-create-structure",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: "sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT",
-        Authorization: "Bearer sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT",
-      },
-      body: JSON.stringify({
-        action: "ler_respostas_entregas",
-        spreadsheetId,
-        folderId,
-      }),
-    }
-  );
-
-  const data = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    console.error("Erro ao ler entregas pela Edge Function:", data);
-    throw new Error(
-      data?.error ||
-        data?.message ||
-        `Edge Function retornou erro HTTP ${response.status}`
-    );
-  }
-
-  if (!data) throw new Error("A Edge Function não retornou dados.");
-  if (data.error) throw new Error(String(data.error));
+  const data = await invocarIntegracaoDrive<any>({
+    action: "ler_respostas_entregas",
+    spreadsheetId,
+    folderId,
+  });
 
   return (data.respostas || []).map((item: any, index: number) => ({
     projeto_id: 0,
