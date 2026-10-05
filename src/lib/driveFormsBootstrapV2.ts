@@ -389,14 +389,6 @@ function instalarBootstrapV2() {
         (item) => item.personagem
       );
 
-      if (!personagensSelecao.length) {
-        throw new Error(
-          `Não encontrei personagens marcados como Em seleção para ${limparNomeProjeto(
-            payload.projectName
-          )}. O formulário não será criado com “A definir”.`
-        );
-      }
-
       const respostaForms = await fetchOriginal(FORMS_PROXY_URL, {
         method: "POST",
         headers: {
