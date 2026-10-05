@@ -59,7 +59,6 @@ import {
   mapMembroDb,
   criarEstruturaDriveViaFunction,
   criarAtualizarFormulariosProjeto,
-  copiarFormulariosViaAppsScript,
   extrairGoogleFileId,
   extrairGoogleFolderId,
   converterDriveParaPreview,
@@ -4746,7 +4745,6 @@ export default function DubworksManager() {
         falasTeste: resultadoDrive.falasTeste || "",
         respostasSelecao: resultadoDrive.respostasSelecao || "",
         cortesProjeto: resultadoDrive.cortesProjeto || "",
-        Advertencia: resultadoDrive.Advertencia || "",
         entregasProjeto: resultadoDrive.entregasProjeto || "",
         formSelecao: resultadoDrive.formSelecao || "",
         formEntregas: resultadoDrive.formEntregas || "",
@@ -4840,7 +4838,6 @@ export default function DubworksManager() {
         !resultado.falasTeste &&
         !resultado.respostasSelecao &&
         !resultado.cortesProjeto &&
-        !resultado.Advertencia &&
         !resultado.entregasProjeto
       ) {
         console.error("Retorno inesperado da função do Drive:", resultado);
@@ -4861,7 +4858,6 @@ export default function DubworksManager() {
           resultado.respostasSelecao || linksAtuais.respostasSelecao || "",
         cortesProjeto:
           resultado.cortesProjeto || linksAtuais.cortesProjeto || "",
-        Advertencia: resultado.Advertencia,
         entregasProjeto:
           resultado.entregasProjeto || linksAtuais.entregasProjeto || "",
         formSelecao: resultado.formSelecao || linksAtuais.formSelecao || "",
@@ -6703,9 +6699,9 @@ export default function DubworksManager() {
   const projetoDrive = rascunho || projetoPainel;
   const driveSalvo = extrairLinksDrive(projetoDrive?.Observacoes);
 
-  const observacoesVisiveis = (projetoPainel?.Observacoes || "")
-    .replace(/\[\[DRIVE_LINKS\]\][\s\S]*?\[\[\/DRIVE_LINKS\]\]/g, "")
-    .trim();
+  const observacoesVisiveis = observacaoPublicaProjetoUI(
+    projetoPainel?.Observacoes
+  );
 
   const driveLinks: {
     chave: "pasta" | "selecao" | "projeto" | "finalizados";
