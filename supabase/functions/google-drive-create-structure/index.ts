@@ -22,7 +22,24 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const userAccessToken = await validarUsuarioAutenticado(req);
+    const usuario = await validarUsuarioAutenticado(req);
+    const projectId = Number(body?.projectId);
+
+    if (!Number.isFinite(projectId) || projectId <= 0) {
+      throw new HttpError(
+        400,
+        "Projeto não informado para autorizar a integração do Google Drive."
+      );
+    }
+
+    const action = String(body?.action || "").trim();
+    const modoAcesso =
+      action === "ler_respostas_selecao" ||
+      action === "ler_respostas_entregas"
+        ? "view"
+        : "edit";
+
+    await exigirAcessoProjeto(projectId, usuario, modoAcesso);
 
     if (body?.action === "criar_estrutura_episodio") {
       const accessToken = await obterGoogleDriveAccessToken();
@@ -73,7 +90,7 @@ Deno.serve(async (req) => {
 
       const resultado = await chamarAppsScript({
         ...body,
-        access_token: userAccessToken,
+        access_token: usuario.token,
       });
       return json(resultado, 200);
     }
@@ -258,7 +275,7 @@ Deno.serve(async (req) => {
         entregasProjetoId: entregasProjeto.id,
 
         // Forms ficam deliberadamente fora desta Edge Function.
-        // driveFormsBootstrapV2 -> /api/forms-copy é o único criador/sincronizador.
+        // O frontend orquestra explicitamente a sincronização via /api/forms-copy.
         formsDelegadosAoProxy: true,
       },
       200
@@ -290,7 +307,15 @@ function obterPublishableKey() {
   return Deno.env.get("SUPABASE_ANON_KEY") || "";
 }
 
-async function validarUsuarioAutenticado(req: Request) {
+type UsuarioAutenticado = {
+  token: string;
+  id: string;
+  email: string;
+};
+
+async function validarUsuarioAutenticado(
+  req: Request
+): Promise<UsuarioAutenticado> {
   const authorization = String(req.headers.get("Authorization") || "").trim();
   const token = authorization.replace(/^Bearer\s+/i, "").trim();
 
@@ -317,11 +342,101 @@ async function validarUsuarioAutenticado(req: Request) {
   }
 
   const user = await response.json().catch(() => null);
-  if (!user?.id) {
+  const email = String(user?.email || "").trim();
+
+  if (!user?.id || !email) {
     throw new HttpError(401, "Usuário autenticado não identificado.");
   }
 
-  return token;
+  return {
+    token,
+    id: String(user.id),
+    email,
+  };
+}
+
+function normalizarAcesso(valor: unknown) {
+  return String(valor || "")
+    .trim()
+    .toLocaleLowerCase("pt-BR");
+}
+
+async function exigirAcessoProjeto(
+  projectId: number,
+  usuario: UsuarioAutenticado,
+  modo: "view" | "edit"
+) {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const publishableKey = obterPublishableKey();
+
+  if (!supabaseUrl || !publishableKey) {
+    throw new HttpError(500, "Configuração de autorização do Supabase ausente.");
+  }
+
+  const headers = {
+    Authorization: `Bearer ${usuario.token}`,
+    apikey: publishableKey,
+  };
+
+  const projetoParams = new URLSearchParams({
+    select: "id,lider,editor",
+    id: `eq.${projectId}`,
+    limit: "1",
+  });
+  const projetoResp = await fetch(
+    `${supabaseUrl}/rest/v1/projetos?${projetoParams.toString()}`,
+    { headers }
+  );
+  const projetos = await projetoResp.json().catch(() => []);
+
+  if (!projetoResp.ok || !Array.isArray(projetos) || !projetos[0]) {
+    throw new HttpError(403, "Você não possui acesso a este projeto.");
+  }
+
+  if (modo === "view") return;
+
+  const perfilParams = new URLSearchParams({
+    select: "cargo,nome,login,vinculo",
+    login: `ilike.${usuario.email}`,
+    limit: "1",
+  });
+  const perfilResp = await fetch(
+    `${supabaseUrl}/rest/v1/usuarios?${perfilParams.toString()}`,
+    { headers }
+  );
+  const perfis = await perfilResp.json().catch(() => []);
+  const perfil =
+    perfilResp.ok && Array.isArray(perfis) && perfis.length ? perfis[0] : null;
+
+  if (!perfil) {
+    throw new HttpError(
+      403,
+      "Seu perfil do DubWorks Manager não foi encontrado."
+    );
+  }
+
+  const projeto = projetos[0];
+  const cargo = normalizarAcesso(perfil.cargo);
+  const identidades = new Set(
+    [perfil.vinculo, perfil.login, perfil.nome]
+      .map(normalizarAcesso)
+      .filter(Boolean)
+  );
+
+  const permitido =
+    cargo === "diretoria" ||
+    cargo === "adm" ||
+    ((cargo === "lider" || cargo === "lider_treinamento") &&
+      identidades.has(normalizarAcesso(projeto.lider))) ||
+    (cargo === "editor" &&
+      identidades.has(normalizarAcesso(projeto.editor)));
+
+  if (!permitido) {
+    throw new HttpError(
+      403,
+      "Você não possui permissão para alterar a estrutura deste projeto."
+    );
+  }
 }
 
 async function obterGoogleDriveAccessToken() {
