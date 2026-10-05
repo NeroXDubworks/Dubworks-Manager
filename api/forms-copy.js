@@ -142,14 +142,6 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!personagens.length) {
-      return responder(res, 400, {
-        ok: false,
-        error:
-          "Nenhum personagem marcado como Em seleção foi recebido. O formulário não será criado com “A definir”.",
-      });
-    }
-
     const capaUrl = String(body?.capaUrl || "").trim();
     const projectType = String(body?.projectType || "Projeto").trim() || "Projeto";
     const projectId = String(body?.projectId || "").trim();
