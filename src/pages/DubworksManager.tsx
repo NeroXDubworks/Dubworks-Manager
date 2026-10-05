@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import "../mobile-first.css";
-import instaladorFormsOficial from "../../integracoes/google-forms-projetos/InstaladorOficial.gs?raw";
-import manifestoFormsOficial from "../../integracoes/google-forms-projetos/appsscript.json?raw";
 import CortesPage from "./CortesPage";
 import ProjectEpisodesPanel from "../components/ProjectEpisodesPanel";
 
@@ -4984,26 +4982,6 @@ export default function DubworksManager() {
     }
   }
 
-  async function copiarTextoIntegracaoForms(
-    texto: string,
-    descricao: string
-  ) {
-    try {
-      await navigator.clipboard.writeText(texto);
-      alert(`${descricao} copiado.`);
-    } catch {
-      window.prompt(`Copie o ${descricao.toLowerCase()} abaixo:`, texto);
-    }
-  }
-
-  function abrirAppsScriptProjetos() {
-    window.open(
-      "https://script.google.com/home/projects/1v_UND0pJz_Wbd-nOJ7s_B5yguz7aV8oe1oibm7QW7jV4ypBeKqVpVpea/edit",
-      "_blank",
-      "noopener,noreferrer"
-    );
-  }
-
   async function criarAtualizarFormulariosProjetoAtual() {
     if (!rascunho || !projetoPainel) return;
 
@@ -7736,41 +7714,6 @@ export default function DubworksManager() {
               Salvar links
             </button>
 
-            {usuarioLogado?.cargo === "diretoria" && (
-              <>
-                <button
-                  onClick={abrirAppsScriptProjetos}
-                  style={botaoSecundarioStyle}
-                  title="Abre o projeto oficial do Apps Script de Projetos/Forms"
-                >
-                  Abrir Apps Script
-                </button>
-
-                <button
-                  onClick={() =>
-                    void copiarTextoIntegracaoForms(
-                      manifestoFormsOficial,
-                      "Manifesto do Apps Script"
-                    )
-                  }
-                  style={botaoSecundarioStyle}
-                >
-                  Copiar manifesto
-                </button>
-
-                <button
-                  onClick={() =>
-                    void copiarTextoIntegracaoForms(
-                      instaladorFormsOficial,
-                      "Instalador oficial"
-                    )
-                  }
-                  style={botaoSecundarioStyle}
-                >
-                  Copiar instalador
-                </button>
-              </>
-            )}
           </div>
         )}
       </div>
@@ -7790,20 +7733,8 @@ export default function DubworksManager() {
         </strong>
         <br />O botão cria a pasta principal do projeto e as subpastas oficiais:
         <strong> 1 | Seleção</strong>, <strong>2 | Projeto</strong> e{" "}
-        <strong>3 | Finalizado</strong>.
-        {usuarioLogado?.cargo === "diretoria" && (
-          <>
-            <br />
-            <br />
-            <strong style={{ color: "#f8fafc" }}>
-              Publicação do Google Forms:
-            </strong>{" "}
-            por exigência do Google, a administração do Apps Script precisa ser
-            autorizada pelo usuário dono do script. No celular, copie primeiro
-            o manifesto, depois o instalador, abra o Apps Script e execute{" "}
-            <strong>instalarDubWorksFormsOficial</strong>.
-          </>
-        )}
+        <strong>3 | Finalizado</strong>. Os formulários são sincronizados
+        automaticamente pelo sistema.
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
