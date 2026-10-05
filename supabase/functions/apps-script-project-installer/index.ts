@@ -1,5 +1,12 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
 const SCRIPT_ID =
   Deno.env.get("GOOGLE_PROJECT_FORMS_SCRIPT_ID") ||
   "1v_UND0pJz_Wbd-nOJ7s_B5yguz7aV8oe1oibm7QW7jV4ypBeKqVpVpea";
@@ -23,6 +30,10 @@ class HttpError extends Error {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   if (req.method !== "POST") {
     return json({ ok: false, error: "POST required" }, 405);
   }
@@ -206,6 +217,7 @@ function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
+      ...corsHeaders,
       "Content-Type": "application/json;charset=utf-8",
       "Cache-Control": "no-store",
     },
