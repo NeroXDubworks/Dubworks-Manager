@@ -881,6 +881,7 @@ export default function DubworksManager() {
     try {
       setSincronizandoSelecao(true);
       const respostas = await lerRespostasSelecaoViaAppsScript(
+        projeto.ID,
         planilhaSelecao,
         pastaRespostasSelecao
       );
@@ -935,6 +936,7 @@ export default function DubworksManager() {
       try {
         setSincronizandoSelecao(true);
         const respostas = await lerRespostasSelecaoViaAppsScript(
+          projeto.ID,
           links.planilhaSelecao || "",
           links.respostasSelecao || links.selecao || ""
         );
@@ -967,6 +969,7 @@ export default function DubworksManager() {
       try {
         setSincronizandoEntregas(true);
         const respostas = await lerRespostasEntregasViaEdge(
+          projeto.ID,
           links.planilhaEntregas || "",
           links.entregasProjeto || links.projeto || ""
         );
@@ -1630,6 +1633,7 @@ export default function DubworksManager() {
       setSincronizandoEntregas(true);
 
       const respostas = await lerRespostasEntregasViaEdge(
+        projeto.ID,
         planilhaEntregas,
         pastaEntregas
       );
@@ -4757,7 +4761,8 @@ export default function DubworksManager() {
         liderEmail,
         editorEmail,
         projetoParaSalvarComHistorico.Tipo,
-        projetoParaSalvarComHistorico.Capa_URL
+        projetoParaSalvarComHistorico.Capa_URL,
+        projetoId
       );
 
       let retornoForms: any = null;
@@ -4897,6 +4902,7 @@ export default function DubworksManager() {
         String(metaProjeto.editor_email || ""),
         rascunho.Tipo || projetoPainel.Tipo || "Projeto",
         rascunho.Capa_URL || projetoPainel.Capa_URL || "",
+        projetoPainel.ID,
         extrairGoogleFolderId(linksAtuais.pasta || "")
       );
 
