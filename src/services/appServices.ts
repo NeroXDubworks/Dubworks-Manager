@@ -2934,6 +2934,23 @@ export async function atualizarProjetoBanco(projeto: Projeto): Promise<boolean> 
   return true;
 }
 
+export async function atualizarObservacoesProjetoBanco(
+  projetoId: string,
+  observacoes: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from("projetos")
+    .update({ observacoes })
+    .eq("id", Number(projetoId));
+
+  if (error) {
+    console.error("Erro ao atualizar observações do projeto:", error);
+    return false;
+  }
+
+  return true;
+}
+
 export async function atualizarArquivamentoProjetoBanco(
   projetoId: string,
   arquivado: boolean
