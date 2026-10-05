@@ -1957,6 +1957,8 @@ export async function criarAtualizarFormulariosProjeto(params: {
   capaUrl?: string;
   respostasSelecaoFolderId: string;
   entregasFolderId: string;
+  falasTesteFolderId?: string;
+  cortesProjetoFolderId?: string;
   personagensSelecao: string[];
   personagensEntregas: string[];
   elenco?: ElencoItem[];
@@ -1996,6 +1998,8 @@ export async function criarAtualizarFormulariosProjeto(params: {
       capaUrl: params.capaUrl || "",
       respostasSelecaoFolderId: params.respostasSelecaoFolderId,
       entregasFolderId: params.entregasFolderId,
+      falasTesteFolderId: params.falasTesteFolderId || "",
+      cortesProjetoFolderId: params.cortesProjetoFolderId || "",
       personagens: params.personagensSelecao,
       personagensSelecao: params.personagensSelecao,
       personagensEntregas: params.personagensEntregas,
@@ -2075,8 +2079,11 @@ export function extrairGoogleFileId(urlOuId?: string) {
   const texto = String(urlOuId || "").trim();
   if (!texto) return "";
 
+  const publishedForm = texto.match(/\/forms\/d\/e\/([^/]+)/);
+  if (publishedForm?.[1]) return "";
+
   const matchD = texto.match(/\/d\/([^/]+)/);
-  if (matchD?.[1]) return matchD[1];
+  if (matchD?.[1] && matchD[1] !== "e") return matchD[1];
 
   const matchId = texto.match(/[?&]id=([^&]+)/);
   if (matchId?.[1]) return matchId[1];
