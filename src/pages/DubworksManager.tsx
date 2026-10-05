@@ -4778,7 +4778,7 @@ export default function DubworksManager() {
             capaUrl: projetoParaSalvarComHistorico.Capa_URL || "",
             respostasSelecaoFolderId,
             entregasFolderId,
-            personagensSelecao,
+            personagensSelecao: personagensEmSelecao,
             personagensEntregas: (projetoParaSalvarComHistorico.Elenco || [])
               .map((item) => item.personagem.trim())
               .filter(Boolean),
