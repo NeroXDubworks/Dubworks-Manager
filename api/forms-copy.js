@@ -1,3 +1,4 @@
+import { ApiAuthError, exigirAcessoProjeto } from "./_shared/projectAuth.js";
 import {
   PROJECT_FORMS_SCRIPT_URL,
   SUPABASE_PUBLISHABLE_KEY,
@@ -12,23 +13,6 @@ function responder(res, status, payload) {
   res.status(status);
   res.setHeader("Cache-Control", "no-store");
   return res.json(payload);
-}
-
-async function validarSessao(req) {
-  const authorization = String(req.headers.authorization || "").trim();
-
-  if (!authorization.toLowerCase().startsWith("bearer ")) {
-    return false;
-  }
-
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: authorization,
-    },
-  });
-
-  return response.ok;
 }
 
 function extrairAccessToken(req) {
@@ -102,17 +86,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    const sessaoValida = await validarSessao(req);
-
-    if (!sessaoValida) {
-      return responder(res, 401, {
-        ok: false,
-        error: "Sessão inválida ou expirada. Entre novamente no DubWorks Manager.",
-      });
-    }
-
-    const accessToken = extrairAccessToken(req);
     const body = lerBody(req);
+    const projectId = String(body?.projectId || "").trim();
+    const auth = await exigirAcessoProjeto(req, projectId, "edit");
+    const accessToken = auth.token;
     const projectName = String(body?.projectName || "").trim();
     const respostasSelecaoFolderId = String(
       body?.respostasSelecaoFolderId || ""
@@ -143,7 +120,6 @@ export default async function handler(req, res) {
 
     const capaUrl = String(body?.capaUrl || "").trim();
     const projectType = String(body?.projectType || "Projeto").trim() || "Projeto";
-    const projectId = String(body?.projectId || "").trim();
     const existingSelectionFormId = String(
       body?.existingSelectionFormId || body?.formSelecaoId || body?.formSelecao || ""
     ).trim();
@@ -242,6 +218,10 @@ export default async function handler(req, res) {
       totalPersonagensEnviados: personagensSelecao.length,
     });
   } catch (erro) {
+    if (erro instanceof ApiAuthError) {
+      return responder(res, erro.status, { ok: false, error: erro.message });
+    }
+
     console.error("Erro no proxy de formulários:", erro);
 
     const mensagem =
