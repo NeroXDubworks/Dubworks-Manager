@@ -369,6 +369,7 @@ export default function ProjectEpisodesPanel({
         }
 
         const drive = await criarEstruturaDriveEpisodio({
+          projectId: projeto.ID,
           projectFolderId,
           finalizadosFolderId,
           numero,
