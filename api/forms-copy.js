@@ -1,13 +1,12 @@
+import {
+  PROJECT_FORMS_SCRIPT_URL,
+  SUPABASE_PUBLISHABLE_KEY,
+  SUPABASE_URL,
+} from "./_shared/runtimeConfig.js";
+
 export const config = {
   maxDuration: 300,
 };
-
-const FORMS_COPIER_URL =
-  "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
-
-const SUPABASE_URL = "https://omgjbafqukpzdhhpdlaa.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY =
-  "sb_publishable_3bAOHbPjpV5RMnqb-cJKRA_cB1okqvT";
 
 function responder(res, status, payload) {
   res.status(status);
@@ -161,7 +160,7 @@ export default async function handler(req, res) {
     let response;
 
     try {
-      response = await fetch(FORMS_COPIER_URL, {
+      response = await fetch(PROJECT_FORMS_SCRIPT_URL, {
         method: "POST",
         headers: {
           "Content-Type": "text/plain;charset=utf-8",
