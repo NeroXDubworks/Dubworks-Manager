@@ -78,6 +78,8 @@ async function prepararTemplatesFormsNoDrive(params) {
         entregasFolderId: params.entregasFolderId,
         falasTesteFolderId: params.falasTesteFolderId || "",
         cortesProjetoFolderId: params.cortesProjetoFolderId || "",
+        existingSelectionFormId: params.existingSelectionFormId || "",
+        existingDeliveriesFormId: params.existingDeliveriesFormId || "",
       }),
     }
   );
@@ -170,6 +172,8 @@ export default async function handler(req, res) {
       entregasFolderId,
       falasTesteFolderId,
       cortesProjetoFolderId,
+      existingSelectionFormId,
+      existingDeliveriesFormId,
     });
 
     const selectionFormIdComUpload = String(
