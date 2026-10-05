@@ -13,7 +13,7 @@ function instalarDubWorksFormsOficial() {
   var scriptId = ScriptApp.getScriptId();
   var deploymentId =
     'AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN';
-  var sourceRef = 'f01ed7d962ced3b29256d2166ba64269eb4b93fa';
+  var sourceRef = '3732ad8c895f3542ea9697e3381f7c76a7f44728';
   var baseRaw =
     'https://raw.githubusercontent.com/NeroXDubworks/Dubworks-Manager/' +
     sourceRef +
