@@ -12,6 +12,7 @@ import {
 import {
   adicionarElencoAoEpisodio,
   abrirSelecaoEmergencial,
+  aprovarSelecaoEmergencial,
   carregarElencoEpisodio,
   carregarEntregasEpisodio,
   carregarEpisodiosProjeto,
@@ -19,8 +20,10 @@ import {
   carregarVagasEpisodio,
   criarEpisodioProjeto,
   criarEstruturaDriveEpisodio,
+  encerrarSelecaoSemSubstituicao,
   finalizarEpisodioProjeto,
   iniciarProducaoEpisodio,
+  marcarSelecaoEmAvaliacao,
   reabrirEpisodioProjeto,
   removerElencoDoEpisodio,
   resumoEntregasEpisodio,
@@ -467,6 +470,91 @@ export default function ProjectEpisodesPanel({
       alert("Seleção emergencial aberta.");
     } catch (e: any) {
       alert(e?.message || "Não foi possível abrir a seleção emergencial.");
+    }
+  }
+
+  async function moverVagaParaAvaliacao(vaga: SelecaoVaga) {
+    if (!podeEditar || !episodio || vaga.status !== "aberta") return;
+
+    try {
+      await marcarSelecaoEmAvaliacao({ vaga, usuario: usuarioNome });
+      await recarregarDetalhes(episodio.id);
+    } catch (e: any) {
+      alert(e?.message || "Não foi possível mover a seleção para avaliação.");
+    }
+  }
+
+  async function encerrarVagaSemSubstituicao(vaga: SelecaoVaga) {
+    if (!podeEditar || !episodio || vaga.status === "encerrada") return;
+    if (
+      !window.confirm(
+        "Encerrar esta seleção sem alterar o dublador do episódio?"
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await encerrarSelecaoSemSubstituicao({
+        vaga,
+        usuario: usuarioNome,
+      });
+      await recarregarDetalhes(episodio.id);
+    } catch (e: any) {
+      alert(e?.message || "Não foi possível encerrar a seleção.");
+    }
+  }
+
+  async function aprovarSubstituicao(vaga: SelecaoVaga) {
+    if (!podeEditar || !episodio || vaga.status === "encerrada") return;
+
+    const dublador =
+      window.prompt(
+        "Nome do dublador aprovado para " + vaga.personagem + ":",
+        ""
+      ) || "";
+    if (!dublador.trim()) return;
+
+    const telefone =
+      window.prompt("Telefone/WhatsApp do novo dublador (opcional):", "") || "";
+
+    const escopoEscolhido =
+      window.prompt(
+        [
+          "Onde aplicar a substituição?",
+          "1 = somente este episódio",
+          "2 = este episódio e os seguintes já cadastrados",
+          "3 = Banco do Projeto + este episódio e os seguintes",
+        ].join("\n"),
+        "1"
+      ) || "";
+
+    const escopo =
+      escopoEscolhido.trim() === "2"
+        ? "a_partir_episodio"
+        : escopoEscolhido.trim() === "3"
+        ? "projeto_diante"
+        : escopoEscolhido.trim() === "1"
+        ? "somente_episodio"
+        : null;
+
+    if (!escopo) {
+      alert("Escolha 1, 2 ou 3 para definir o alcance da substituição.");
+      return;
+    }
+
+    try {
+      await aprovarSelecaoEmergencial({
+        vaga,
+        dublador,
+        telefone,
+        escopo,
+        usuario: usuarioNome,
+      });
+      await recarregarDetalhes(episodio.id);
+      alert("Substituição aprovada e aplicada.");
+    } catch (e: any) {
+      alert(e?.message || "Não foi possível aprovar a substituição.");
     }
   }
 
@@ -1169,8 +1257,57 @@ export default function ProjectEpisodesPanel({
                           </span>
                           <div style={{ color: "#64748b", fontSize: 11 }}>
                             {vaga.motivo || "Sem motivo informado"} ·{" "}
-                            {vaga.status}
+                            {vaga.status === "avaliacao"
+                              ? "em avaliação"
+                              : vaga.status}
+                            {vaga.escopo_aprovacao
+                              ? " · " +
+                                (vaga.escopo_aprovacao === "somente_episodio"
+                                  ? "somente este episódio"
+                                  : vaga.escopo_aprovacao === "a_partir_episodio"
+                                  ? "episódio e seguintes"
+                                  : "Banco do Projeto e seguintes")
+                              : ""}
                           </div>
+
+                          {podeEditar && vaga.status !== "encerrada" && (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 7,
+                                flexWrap: "wrap",
+                                marginTop: 9,
+                              }}
+                            >
+                              {vaga.status === "aberta" && (
+                                <button
+                                  style={secondary}
+                                  onClick={() =>
+                                    void moverVagaParaAvaliacao(vaga)
+                                  }
+                                >
+                                  Em avaliação
+                                </button>
+                              )}
+                              <button
+                                style={primary}
+                                onClick={() => void aprovarSubstituicao(vaga)}
+                              >
+                                Aprovar substituição
+                              </button>
+                              <button
+                                style={{
+                                  ...secondary,
+                                  color: "#fda4af",
+                                }}
+                                onClick={() =>
+                                  void encerrarVagaSemSubstituicao(vaga)
+                                }
+                              >
+                                Encerrar sem substituição
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                       {!vagas.length && (
