@@ -2013,6 +2013,58 @@ export async function criarAtualizarFormulariosProjeto(params: {
   return data;
 }
 
+export async function finalizarArquivosProjeto(
+  projeto: Projeto
+): Promise<any> {
+  const links = extrairLinksDrive(projeto.Observacoes || "");
+  const projetoFolderId = extrairGoogleFolderId(
+    links.projeto || links.cortes || ""
+  );
+  const finalizadosFolderId = extrairGoogleFolderId(links.finalizados || "");
+
+  if (!projetoFolderId || !finalizadosFolderId) {
+    throw new Error(
+      "Não encontrei as pastas 2 | Projeto e 3 | Finalizado para concluir os arquivos."
+    );
+  }
+
+  const {
+    data: { session },
+    error: erroSessao,
+  } = await supabase.auth.getSession();
+
+  if (erroSessao || !session?.access_token) {
+    throw new Error("Sua sessão expirou antes de finalizar os arquivos do Drive.");
+  }
+
+  const response = await fetch("/api/project-finalize", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      projectId: projeto.ID,
+      projectName: projeto.Projeto,
+      projetoFolderId,
+      finalizadosFolderId,
+      videoEditorLink: projeto.Video_Editor_Link || "",
+    }),
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok || !data || data.ok === false || data.error) {
+    throw new Error(
+      data?.error ||
+        data?.message ||
+        `Automação de finalização retornou HTTP ${response.status}.`
+    );
+  }
+
+  return data;
+}
+
 export function extrairGoogleFileId(urlOuId?: string) {
   const texto = String(urlOuId || "").trim();
   if (!texto) return "";
