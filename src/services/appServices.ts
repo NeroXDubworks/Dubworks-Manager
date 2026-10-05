@@ -1931,9 +1931,15 @@ export async function criarEstruturaDriveViaFunction(
   editorEmail = "",
   projectType = "Projeto",
   capaUrl = "",
+  projectId = "",
   existingFolderId = ""
 ): Promise<DriveStructureResult> {
+  if (!projectId) {
+    throw new Error("Projeto não informado para a integração do Google Drive.");
+  }
+
   return invocarIntegracaoDrive<DriveStructureResult>({
+    projectId,
     projectName: projetoNome,
     projectType,
     leaderEmail,
@@ -2102,6 +2108,7 @@ export function converterDriveParaPreview(url?: string) {
 }
 
 export async function lerRespostasSelecaoViaAppsScript(
+  projetoId: string,
   planilhaSelecaoIdOuUrl: string,
   pastaRespostasSelecaoIdOuUrl = ""
 ): Promise<RespostaSelecao[]> {
@@ -2116,6 +2123,7 @@ export async function lerRespostasSelecaoViaAppsScript(
 
   const data = await invocarIntegracaoDrive<any>({
     action: "ler_respostas_selecao",
+    projectId: projetoId,
     spreadsheetId,
     folderId,
   });
@@ -2182,6 +2190,7 @@ export async function carregarAvaliacoesSelecaoBanco(
 }
 
 export async function lerRespostasEntregasViaEdge(
+  projetoId: string,
   planilhaEntregasIdOuUrl: string,
   pastaEntregasIdOuUrl = ""
 ): Promise<EntregaProducao[]> {
@@ -2196,6 +2205,7 @@ export async function lerRespostasEntregasViaEdge(
 
   const data = await invocarIntegracaoDrive<any>({
     action: "ler_respostas_entregas",
+    projectId: projetoId,
     spreadsheetId,
     folderId,
   });
