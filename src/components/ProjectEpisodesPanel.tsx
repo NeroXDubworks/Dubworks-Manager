@@ -2,8 +2,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { ElencoItem, Projeto } from "../types";
 import {
   enfileirarLembreteWhatsapp,
+  criarAtualizarFormulariosProjeto,
+  extrairGoogleFileId,
   extrairGoogleFolderId,
   extrairLinksDrive,
+  salvarLinksDriveEmObservacoes,
+  atualizarObservacoesProjetoBanco,
 } from "../services/appServices";
 import {
   adicionarElencoAoEpisodio,
@@ -16,6 +20,7 @@ import {
   criarEpisodioProjeto,
   criarEstruturaDriveEpisodio,
   finalizarEpisodioProjeto,
+  iniciarProducaoEpisodio,
   reabrirEpisodioProjeto,
   removerElencoDoEpisodio,
   resumoEntregasEpisodio,
@@ -220,6 +225,95 @@ export default function ProjectEpisodesPanel({
     }
   }
 
+  async function sincronizarFormsEpisodios(lista: ProjetoEpisodio[]) {
+    const links = extrairLinksDrive(projeto.Observacoes || "");
+    const respostasSelecaoFolderId = extrairGoogleFolderId(
+      links.respostasSelecao || ""
+    );
+    const entregasFolderId = extrairGoogleFolderId(
+      links.entregasProjeto || ""
+    );
+
+    if (!respostasSelecaoFolderId || !entregasFolderId) {
+      throw new Error(
+        "A estrutura do Drive do projeto ainda não possui as pastas necessárias para sincronizar os Forms."
+      );
+    }
+
+    const personagensEntregas = Array.from(
+      new Set(
+        (projeto.Elenco || [])
+          .map((item) => String(item.personagem || "").trim())
+          .filter(Boolean)
+      )
+    );
+    const personagensSelecao = Array.from(
+      new Set(
+        (projeto.Elenco || [])
+          .filter((item) => item.em_selecao !== false)
+          .map((item) => String(item.personagem || "").trim())
+          .filter(Boolean)
+      )
+    );
+    const episodiosForm = [...lista]
+      .sort((a, b) => a.numero - b.numero)
+      .map(
+        (item) =>
+          `EP ${String(item.numero).padStart(2, "0")} - ${item.titulo || "Sem título"}`
+      );
+
+    const retorno = await criarAtualizarFormulariosProjeto({
+      projectId: projeto.ID,
+      projectName: projeto.Projeto,
+      projectType: projeto.Tipo || "Projeto",
+      capaUrl: projeto.Capa_URL || "",
+      respostasSelecaoFolderId,
+      entregasFolderId,
+      personagensSelecao,
+      personagensEntregas,
+      elenco: projeto.Elenco || [],
+      episodios: episodiosForm,
+      existingSelectionFormId: extrairGoogleFileId(links.formSelecao || ""),
+      existingDeliveriesFormId: extrairGoogleFileId(links.formEntregas || ""),
+    });
+
+    const lerUrl = (valor: any) =>
+      String(
+        valor?.viewUrl ||
+          valor?.formUrl ||
+          valor?.url ||
+          valor?.editUrl ||
+          valor ||
+          ""
+      ).trim();
+
+    const novosLinks = {
+      ...links,
+      formSelecao:
+        lerUrl(retorno?.formSelecao) || links.formSelecao || "",
+      formEntregas:
+        lerUrl(retorno?.formEntregas) || links.formEntregas || "",
+      planilhaSelecao:
+        lerUrl(retorno?.planilhaSelecao) || links.planilhaSelecao || "",
+      planilhaEntregas:
+        lerUrl(retorno?.planilhaEntregas) || links.planilhaEntregas || "",
+    };
+
+    const observacoes = salvarLinksDriveEmObservacoes(
+      projeto.Observacoes || "",
+      novosLinks
+    );
+
+    if (observacoes !== (projeto.Observacoes || "")) {
+      const ok = await atualizarObservacoesProjetoBanco(projeto.ID, observacoes);
+      if (!ok) {
+        throw new Error(
+          "Os Forms foram sincronizados, mas os links não puderam ser salvos no projeto."
+        );
+      }
+    }
+  }
+
   useEffect(() => {
     setEpisodioId(null);
     void recarregarEpisodios(null);
@@ -255,6 +349,9 @@ export default function ProjectEpisodesPanel({
         criadoPor: usuarioNome,
       });
 
+      let avisoDrive = "";
+      let avisoForms = "";
+
       try {
         const links = extrairLinksDrive(projeto.Observacoes || "");
         const projectFolderId = extrairGoogleFolderId(links.projeto || "");
@@ -262,31 +359,60 @@ export default function ProjectEpisodesPanel({
           links.finalizados || ""
         );
 
-        if (projectFolderId && finalizadosFolderId) {
-          const drive = await criarEstruturaDriveEpisodio({
-            projectFolderId,
-            finalizadosFolderId,
-            numero,
-            titulo: novo.titulo,
-          });
-
-          criado = await atualizarEpisodioProjeto(criado.id, {
-            pasta_drive_id: drive.episodioId,
-            pasta_cortes_id: drive.cortesId,
-            pasta_entregas_id: drive.entregasId,
-            pasta_finalizado_id: drive.finalizadoId,
-          });
+        if (!projectFolderId || !finalizadosFolderId) {
+          throw new Error(
+            "Não encontrei as pastas 2 | Projeto e 3 | Finalizado."
+          );
         }
-      } catch (erro) {
+
+        const drive = await criarEstruturaDriveEpisodio({
+          projectFolderId,
+          finalizadosFolderId,
+          numero,
+          titulo: novo.titulo,
+        });
+
+        criado = await atualizarEpisodioProjeto(criado.id, {
+          pasta_drive_id: drive.episodioId,
+          pasta_cortes_id: drive.cortesId,
+          pasta_entregas_id: drive.entregasId,
+          pasta_finalizado_id: drive.finalizadoId,
+        });
+      } catch (erro: any) {
         console.warn(
           "Episódio criado, mas as pastas do Drive não puderam ser criadas:",
           erro
         );
+        avisoDrive =
+          " As pastas do episódio não foram criadas no Drive: " +
+          (erro?.message || "erro desconhecido") +
+          ".";
+      }
+
+      try {
+        const listaAtualizada = [
+          ...episodios.filter((item) => item.id !== criado.id),
+          criado,
+        ];
+        await sincronizarFormsEpisodios(listaAtualizada);
+      } catch (erro: any) {
+        console.warn(
+          "Episódio criado, mas o Form de Entregas não foi sincronizado:",
+          erro
+        );
+        avisoForms =
+          " O Form de Entregas não foi sincronizado: " +
+          (erro?.message || "erro desconhecido") +
+          ".";
       }
 
       setNovo({ titulo: "", descricao: "", prazo: "" });
       setMostrarNovo(false);
       await recarregarEpisodios(criado.id);
+
+      if (avisoDrive || avisoForms) {
+        alert("Episódio criado." + avisoDrive + avisoForms);
+      }
     } catch (e: any) {
       alert(e?.message || "Não foi possível criar o episódio.");
     }
@@ -305,6 +431,7 @@ export default function ProjectEpisodesPanel({
         projetoId: projeto.ID,
         episodioId: episodio.id,
         item,
+        usuario: usuarioNome,
       });
       setElencoIdAdicionar("");
       await recarregarDetalhes(episodio.id);
@@ -409,11 +536,7 @@ export default function ProjectEpisodesPanel({
   async function iniciarProducao() {
     if (!podeEditar || !episodio) return;
     try {
-      await atualizarEpisodioProjeto(episodio.id, {
-        status: "em_producao",
-        data_inicio:
-          episodio.data_inicio || new Date().toISOString().slice(0, 10),
-      });
+      await iniciarProducaoEpisodio(episodio, usuarioNome);
       await recarregarEpisodios(episodio.id);
     } catch (e: any) {
       alert(e?.message || "Não foi possível iniciar a produção.");
@@ -912,7 +1035,13 @@ export default function ProjectEpisodesPanel({
                                       )
                                     )
                                       return;
-                                    await removerElencoDoEpisodio(item.id);
+                                    await removerElencoDoEpisodio({
+                                      episodioElencoId: item.id,
+                                      projetoId: projeto.ID,
+                                      episodioId: episodio.id,
+                                      personagem: item.personagem,
+                                      usuario: usuarioNome,
+                                    });
                                     await recarregarDetalhes(episodio.id);
                                   }}
                                 >
