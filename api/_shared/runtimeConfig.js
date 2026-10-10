@@ -1,5 +1,5 @@
 export const PROJECT_FORMS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
+  "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
 
 export const SUPABASE_URL =
   process.env.SUPABASE_URL || "https://omgjbafqukpzdhhpdlaa.supabase.co";
