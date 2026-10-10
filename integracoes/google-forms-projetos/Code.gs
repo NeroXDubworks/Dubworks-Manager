@@ -263,9 +263,7 @@ function obterOuCriarFormulario_(opts) {
       form.setTitle(tituloFormulario_(opts.tipo, opts.projectName));
       return { form: form, reused: true };
     } catch (err) {
-      console.warn(
-        'Formulário registrado não pôde ser aberto; será recriado: ' + err
-      );
+      throw new Error('O formulário existente não pôde ser aberto. Verifique permissões ou ID antes de criar outro: ' + err);
     }
   }
 
@@ -286,7 +284,7 @@ function prepararFormulario_(form, opts) {
   form.setTitle(tituloFormulario_(opts.tipo, opts.projectName));
 
   atualizarPersonagens_(form, opts.personagens);
-  removerCamposLinkObsoletos_(form, opts.tipo);
+  // Preserve os campos de link alternativo do modelo Demon Slayer.
   garantirUploadTemplate_(form, opts.tipo);
 
   if (opts.capaUrl) {
@@ -313,6 +311,7 @@ function atualizarPersonagens_(form, personagens) {
     'personagens',
     'personagem desejado',
     'escolha o personagem',
+    'personagem do teste',
   ];
 
   const items = form.getItems();
@@ -492,7 +491,7 @@ function garantirPlanilhaRespostas_(form, titulo, pasta) {
       moverArquivoParaPasta_(ss.getId(), pasta);
       return ss;
     } catch (err) {
-      console.warn('Destino anterior não pôde ser reutilizado: ' + err);
+      throw new Error('Planilha de respostas existente inacessível. Corrija o vínculo sem recriar a planilha: ' + err);
     }
   }
 
@@ -739,7 +738,7 @@ function lerRespostas_(payload, tipo) {
   };
 
   const iTimestamp = idx(['carimbo de data/hora', 'timestamp', 'data']);
-  const iNome = idx(['nome', 'nome do dublador', 'dublador']);
+  const iNome = idx(['nome', 'nome do dublador', 'dublador', 'nome do membro', 'nome do membro:']);
   const iTelefone = idx([
     'número de telefone / whatsapp',
     'numero de telefone / whatsapp',
@@ -747,17 +746,20 @@ function lerRespostas_(payload, tipo) {
     'whatsapp',
     'número / id',
     'numero / id',
+    'número de telefone do membro',
+    'numero de telefone do membro',
   ]);
   const iPersonagem = idx([
     'personagem',
     'personagem desejado',
     'escolha o personagem',
+    'personagem do teste',
   ]);
   const iSemana = idx(['semana', 'semana / corte', 'episódio', 'episodio']);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
   const iUpload =
     tipo === 'selecao'
-      ? idx(['upload do teste', 'teste', 'arquivo'])
+      ? idx(['upload do teste', 'teste', 'arquivo', 'vídeo do teste', 'video do teste'])
       : idx(['upload da entrega', 'entrega', 'arquivo']);
 
   const respostas = [];
