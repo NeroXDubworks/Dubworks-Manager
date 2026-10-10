@@ -4747,8 +4747,12 @@ export default function DubworksManager() {
     setCriandoNovoProjeto(true);
 
     try {
-    // Se uma etapa externa falhou, retomar o projeto já persistido na tentativa.
-    const projetoId = projetoNovoPersistidoRef.current || await criarProjetoBanco(projetoParaSalvarComHistorico);
+    // Nunca cria outra linha no banco quando a tentativa atual já salvou um ID.
+    if (projetoNovoPersistidoRef.current) {
+      alert(`O projeto ${projetoNovoPersistidoRef.current} já está no banco. Abra-o na listagem e use as opções de recuperação em Informações.`);
+      return;
+    }
+    const projetoId = await criarProjetoBanco(projetoParaSalvarComHistorico);
     if (!projetoId) {
       alert("Erro ao salvar no banco.");
       return;
