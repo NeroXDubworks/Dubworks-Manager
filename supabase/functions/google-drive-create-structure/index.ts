@@ -65,6 +65,15 @@ Deno.serve(async (req) => {
         throw new HttpError(400, "Informe duas pastas distintas de Falas Teste e Respostas da seleção.");
       }
       const accessToken = await obterGoogleDriveAccessToken();
+      const [origem, destino] = await Promise.all([
+        obterArquivoDrive(pastaFalas, accessToken),
+        obterArquivoDrive(pastaRespostas, accessToken),
+      ]);
+      const origemPais = Array.isArray(origem?.parents) ? origem.parents : [];
+      const destinoPais = Array.isArray(destino?.parents) ? destino.parents : [];
+      if (!origemPais.length || !origemPais.some((id: string) => destinoPais.includes(id))) {
+        throw new HttpError(400, "Falas Teste e Respostas precisam ser subpastas da mesma pasta Seleção.");
+      }
       const arquivosRealocados = await retirarFormulariosDaPastaFalasTeste(
         pastaFalas, pastaRespostas, nome, "", accessToken
       );
