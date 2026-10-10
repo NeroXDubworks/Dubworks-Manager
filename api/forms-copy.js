@@ -205,6 +205,7 @@ export default async function handler(req, res) {
           projetoNome: projectName,
           respostasSelecaoFolderId,
           entregasFolderId,
+          falasTesteFolderId,
           existingSelectionFormId: selectionFormIdComUpload,
           existingDeliveriesFormId: deliveriesFormIdComUpload,
           episodios,
