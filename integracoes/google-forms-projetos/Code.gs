@@ -85,6 +85,10 @@ function prepararFormulariosProjeto_(payload) {
     payload.respostasSelecaoFolderId
   );
   const entregasFolderId = extrairId_(payload.entregasFolderId);
+  const falasTesteFolderId = extrairId_(payload.falasTesteFolderId);
+  if (falasTesteFolderId && (falasTesteFolderId === respostasSelecaoFolderId || falasTesteFolderId === entregasFolderId)) {
+    throw new Error('Falas Teste é compartilhada com os membros e não pode receber Forms/planilhas.');
+  }
   const personagensSelecao = normalizarLista_(
     payload.personagensSelecao ||
       payload.personagens ||
