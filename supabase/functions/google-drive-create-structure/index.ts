@@ -57,6 +57,20 @@ Deno.serve(async (req) => {
       return json(resultado, 200);
     }
 
+    if (action === "conferir_destino_selecao") {
+      const nome = limparNomeProjeto(body?.projectName);
+      const pastaFalas = extrairId(body?.falasTesteFolderId);
+      const pastaRespostas = extrairId(body?.respostasSelecaoFolderId);
+      if (!nome || !pastaFalas || !pastaRespostas || pastaFalas === pastaRespostas) {
+        throw new HttpError(400, "Informe duas pastas distintas de Falas Teste e Respostas da seleção.");
+      }
+      const accessToken = await obterGoogleDriveAccessToken();
+      const arquivosRealocados = await retirarFormulariosDaPastaFalasTeste(
+        pastaFalas, pastaRespostas, nome, "", accessToken
+      );
+      return json({ ok: true, arquivosRealocados }, 200);
+    }
+
     if (body?.action === "criar_estrutura_episodio") {
       const accessToken = await obterGoogleDriveAccessToken();
       const resultado = await criarEstruturaEpisodio(body, accessToken);
@@ -485,6 +499,9 @@ async function prepararTemplatesForms(body: any, token: string) {
       "Nome do projeto e pastas de Seleção/Entregas são obrigatórios."
     );
   }
+  if (falasTesteFolderId && (falasTesteFolderId === respostasSelecaoFolderId || falasTesteFolderId === entregasFolderId)) {
+    throw new HttpError(400, "Falas Teste deve ser uma pasta separada: jamais destino de Forms ou planilhas.");
+  }
 
   await renomearArquivoDrive(
     respostasSelecaoFolderId,
@@ -753,35 +770,28 @@ async function retirarFormulariosDaPastaFalasTeste(
   falasTesteFolderId: string,
   respostasSelecaoFolderId: string,
   projectName: string,
-  formCorretoId: string,
+  _formCorretoId: string,
   token: string
-) {
-  const forms = await listarArquivosFilhosPorMime(
-    falasTesteFolderId,
-    "application/vnd.google-apps.form",
-    token
-  );
-
-  const chaveProjeto = normalizarTextoDrive(projectName);
-
-  for (const form of forms) {
-    if (form.id === formCorretoId) continue;
-
-    const nomeNormalizado = normalizarTextoDrive(form.name);
-    if (
-      !nomeNormalizado.includes(chaveProjeto) &&
-      !nomeNormalizado.includes("selecao")
-    ) {
-      continue;
-    }
-
-    await moverArquivoDrive(form.id, respostasSelecaoFolderId, token);
-    await renomearArquivoDrive(
-      form.id,
-      `[OBSOLETO] ${form.name || "[Seleção] " + projectName}`,
-      token
-    );
+): Promise<number> {
+  if (falasTesteFolderId === respostasSelecaoFolderId) {
+    throw new HttpError(400, "A pasta Falas Teste não pode ser a pasta Respostas.");
   }
+  // Falas Teste é compartilhada com membros. Nunca deixar arquivos de sistema
+  // (Forms e planilhas do projeto) nela; não tocar em falas/mídias dos membros.
+  const chaveProjeto = normalizarTextoDrive(projectName);
+  let realocados = 0;
+  for (const mime of [
+    "application/vnd.google-apps.form",
+    "application/vnd.google-apps.spreadsheet",
+  ]) {
+    const arquivos = await listarArquivosFilhosPorMime(falasTesteFolderId, mime, token);
+    for (const arquivo of arquivos) {
+      if (!normalizarTextoDrive(arquivo.name).includes(chaveProjeto)) continue;
+      await moverArquivoDrive(arquivo.id, respostasSelecaoFolderId, token);
+      realocados++;
+    }
+  }
+  return realocados;
 }
 
 function normalizarTextoDrive(valor: unknown) {
