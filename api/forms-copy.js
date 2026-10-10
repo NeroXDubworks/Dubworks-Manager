@@ -159,6 +159,9 @@ export default async function handler(req, res) {
       body?.existingDeliveriesFormId || body?.formEntregasId || body?.formEntregas || ""
     ).trim();
     const falasTesteFolderId = String(body?.falasTesteFolderId || "").trim();
+    if (falasTesteFolderId && [respostasSelecaoFolderId, entregasFolderId].includes(falasTesteFolderId)) {
+      return responder(res, 400, { ok: false, error: "Falas Teste não pode receber formulários ou planilhas. Confira os IDs das pastas." });
+    }
     const cortesProjetoFolderId = String(body?.cortesProjetoFolderId || "").trim();
     const episodios = Array.isArray(body?.episodios)
       ? body.episodios.map((item) => String(item || "").trim()).filter(Boolean)
@@ -264,8 +267,46 @@ export default async function handler(req, res) {
       });
     }
 
+    // O Apps Script pode gerar/mover recursos depois da preparação dos templates.
+    // Conferir Falas Teste SOMENTE ao final evita que Forms fiquem na pasta
+    // compartilhada com os membros. Nunca apaga arquivos nem toca nas falas.
+    let avisoDestino = "";
+    let arquivosRealocados = 0;
+    if (falasTesteFolderId) {
+      try {
+        const verificacao = await fetch(
+          `${SUPABASE_URL}/functions/v1/google-drive-create-structure`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: SUPABASE_PUBLISHABLE_KEY,
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              action: "conferir_destino_selecao",
+              projectId,
+              projectName,
+              falasTesteFolderId,
+              respostasSelecaoFolderId,
+            }),
+          }
+        );
+        const retornoVerificacao = await verificacao.json().catch(() => null);
+        if (!verificacao.ok || !retornoVerificacao || retornoVerificacao.ok === false) {
+          throw new Error(retornoVerificacao?.error || "Não foi possível conferir a pasta Falas Teste.");
+        }
+        arquivosRealocados = Number(retornoVerificacao.arquivosRealocados || 0);
+      } catch (erro) {
+        avisoDestino = "Formulários preparados, mas não foi possível conferir a pasta compartilhada Falas Teste. Verifique os arquivos antes de divulgar.";
+        console.error(avisoDestino, erro);
+      }
+    }
+
     return responder(res, 200, {
       ...data,
+      avisoDestino,
+      arquivosRealocados,
       personagensEnviados: personagensSelecao,
       personagensEntregasEnviados: personagensEntregas,
       totalPersonagensEnviados: personagensSelecao.length,
