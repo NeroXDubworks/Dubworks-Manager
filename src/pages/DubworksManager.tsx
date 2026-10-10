@@ -227,6 +227,9 @@ export default function DubworksManager() {
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null);
   const [rascunho, setRascunho] = useState<Projeto | null>(null);
   const [mostrarNovoProjeto, setMostrarNovoProjeto] = useState(false);
+  const [criandoNovoProjeto, setCriandoNovoProjeto] = useState(false);
+  const criandoNovoProjetoRef = useRef(false);
+  const projetoNovoPersistidoRef = useRef<string | null>(null);
   const [mostrarUsuarios, setMostrarUsuarios] = useState(false);
   const [mostrarFormNovoUsuario, setMostrarFormNovoUsuario] = useState(false);
   const [mostrarMembros, setMostrarMembros] = useState(false);
@@ -4738,11 +4741,23 @@ export default function DubworksManager() {
         .join("\n"),
     };
 
+    // Impede cliques duplos enquanto a criação do banco/Drive/Forms está em andamento.
+    if (criandoNovoProjetoRef.current) return;
+    criandoNovoProjetoRef.current = true;
+    setCriandoNovoProjeto(true);
+
+    try {
+    // Nunca cria outra linha no banco quando a tentativa atual já salvou um ID.
+    if (projetoNovoPersistidoRef.current) {
+      alert(`O projeto ${projetoNovoPersistidoRef.current} já está no banco. Abra-o na listagem e use as opções de recuperação em Informações.`);
+      return;
+    }
     const projetoId = await criarProjetoBanco(projetoParaSalvarComHistorico);
     if (!projetoId) {
       alert("Erro ao salvar no banco.");
       return;
     }
+    projetoNovoPersistidoRef.current = projetoId;
 
     const elencoOk = await salvarElencoProjetoBanco(
       projetoId,
@@ -4796,6 +4811,7 @@ export default function DubworksManager() {
             elenco: projetoParaSalvarComHistorico.Elenco || [],
             episodios: [],
           });
+          if (retornoForms?.avisoDestino) avisoAutomacao += ` ${retornoForms.avisoDestino}`;
         } catch (erroForms: any) {
           console.error(
             "Pastas criadas, mas os formulários não puderam ser sincronizados:",
@@ -4857,7 +4873,18 @@ export default function DubworksManager() {
     setMostrarNovoProjeto(false);
     limparFormularioProjeto();
     abrirProjetoDetalhe(projetoId);
+    projetoNovoPersistidoRef.current = null;
     alert(`Projeto salvo no banco 🚀${avisoAutomacao}`);
+    } catch (erro: any) {
+      console.error("Falha na criação do projeto:", erro);
+      const idExistente = projetoNovoPersistidoRef.current;
+      alert(idExistente
+        ? `O projeto ${idExistente} já foi criado no banco. Não clique em criar novamente: abra o projeto na listagem e retome a integração em Informações. Detalhes: ${erro?.message || String(erro)}`
+        : `Não foi possível criar o projeto. Detalhes: ${erro?.message || String(erro)}`);
+    } finally {
+      criandoNovoProjetoRef.current = false;
+      setCriandoNovoProjeto(false);
+    }
   }
 
   function registrarHistoricoProjeto(texto: string) {
@@ -5108,7 +5135,7 @@ export default function DubworksManager() {
 
       setRascunho(comHistorico);
       await recarregarProjetos();
-      alert("Formulários de Seleção e Entregas atualizados com sucesso.");
+      alert("Formulários de Seleção e Entregas atualizados com sucesso." + (retorno?.avisoDestino ? `\n\nAtenção: ${retorno.avisoDestino}` : ""));
     } catch (erro: any) {
       console.error("Erro ao criar/atualizar formulários:", erro);
       alert(
@@ -6917,14 +6944,6 @@ export default function DubworksManager() {
       })
     : [];
 
-  function abrirLink(link?: string) {
-    if (!link) {
-      alert("Link ainda não cadastrado.");
-      return;
-    }
-    window.open(link, "_blank", "noopener,noreferrer");
-  }
-
   const membroSelecionado =
     membros.find((m) => m.id === membroSelecionadoId) || null;
 
@@ -7821,24 +7840,18 @@ export default function DubworksManager() {
                 </div>
               )}
 
-              {isMobile && (
-                <button
-                  onClick={() => abrirLink(item.link || "")}
-                  style={{ ...botaoSecundarioStyle, marginTop: 10 }}
-                >
-                  Abrir ↗
-                </button>
-              )}
+              {isMobile && (item.link ? (
+                <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ ...botaoSecundarioStyle, marginTop: 10, display: "inline-flex", textDecoration: "none" }}>Abrir ↗</a>
+              ) : (
+                <button type="button" disabled style={{ ...botaoSecundarioStyle, marginTop: 10, opacity: 0.6 }}>Link não cadastrado</button>
+              ))}
             </div>
 
-            {!isMobile && (
-              <button
-                onClick={() => abrirLink(item.link || "")}
-                style={botaoSecundarioStyle}
-              >
-                Abrir ↗
-              </button>
-            )}
+            {!isMobile && (item.link ? (
+              <a href={item.link} target="_blank" rel="noopener noreferrer" style={{ ...botaoSecundarioStyle, display: "inline-flex", textDecoration: "none" }}>Abrir ↗</a>
+            ) : (
+              <button type="button" disabled style={{ ...botaoSecundarioStyle, opacity: 0.6 }}>Link não cadastrado</button>
+            ))}
           </div>
         ))}
       </div>
@@ -17430,16 +17443,18 @@ export default function DubworksManager() {
               }}
             >
               <button
+                disabled={criandoNovoProjeto}
                 onClick={() => {
+                  projetoNovoPersistidoRef.current = null;
                   setMostrarNovoProjeto(false);
                   limparFormularioProjeto();
                 }}
-                style={botaoSecundarioStyle}
+                style={{...botaoSecundarioStyle, opacity: criandoNovoProjeto ? 0.5 : 1}}
               >
                 Cancelar
               </button>
-              <button onClick={criarProjeto} style={botaoPrimarioStyle}>
-                Criar projeto
+              <button disabled={criandoNovoProjeto} onClick={criarProjeto} style={{...botaoPrimarioStyle, opacity: criandoNovoProjeto ? 0.65 : 1}}>
+                {criandoNovoProjeto ? "Criando projeto, pastas e formulários..." : "Criar projeto"}
               </button>
             </div>
           </div>
