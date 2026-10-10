@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const PROJECT_FORMS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
+  "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
 
 const FORM_TEMPLATE_SELECTION_WITH_UPLOAD =
   Deno.env.get("GOOGLE_FORMS_SELECTION_UPLOAD_TEMPLATE_ID") ||
@@ -104,10 +104,13 @@ Deno.serve(async (req) => {
         );
       }
 
-      const resultado = await chamarAppsScript({
-        ...body,
-        access_token: usuario.token,
-      });
+      // Corrige referência antiga de planilha no fluxo de seleção do projeto 151.
+      // Não cria nem modifica respostas, formulários ou avaliações.
+      const payloadForms = { ...body, access_token: usuario.token };
+      if (projectId === 151 && action === "ler_respostas_selecao") {
+        payloadForms.spreadsheetId = "1dRjzcVJKgbH69bBvAWDrGI9oMEt20x5o_Sall6sYEFU";
+      }
+      const resultado = await chamarAppsScript(payloadForms);
       return json(resultado, 200);
     }
 
