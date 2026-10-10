@@ -4811,6 +4811,7 @@ export default function DubworksManager() {
             elenco: projetoParaSalvarComHistorico.Elenco || [],
             episodios: [],
           });
+          if (retornoForms?.avisoDestino) avisoAutomacao += ` ${retornoForms.avisoDestino}`;
         } catch (erroForms: any) {
           console.error(
             "Pastas criadas, mas os formulários não puderam ser sincronizados:",
@@ -5134,7 +5135,7 @@ export default function DubworksManager() {
 
       setRascunho(comHistorico);
       await recarregarProjetos();
-      alert("Formulários de Seleção e Entregas atualizados com sucesso.");
+      alert("Formulários de Seleção e Entregas atualizados com sucesso." + (retorno?.avisoDestino ? `\n\nAtenção: ${retorno.avisoDestino}` : ""));
     } catch (erro: any) {
       console.error("Erro ao criar/atualizar formulários:", erro);
       alert(
