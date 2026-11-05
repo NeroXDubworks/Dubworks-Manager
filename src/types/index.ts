@@ -187,6 +187,7 @@ export type EntregaProducao = {
   semana: string;
   video_url: string;
   comentario: string;
+  comentario_lider?: string | null;
   status: "pendente" | "aprovado" | "regravacao";
   avaliado_por?: string | null;
   data_envio?: string | null;
