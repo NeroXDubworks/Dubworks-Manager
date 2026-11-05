@@ -447,6 +447,7 @@ export default function DubworksManager() {
     []
   );
   const [entregaVisualizadaId, setEntregaVisualizadaId] = useState<number | null>(null);
+  const [comentarioLiderPorEntrega, setComentarioLiderPorEntrega] = useState<Record<number, string>>({});
   const [sincronizandoEntregas, setSincronizandoEntregas] = useState(false);
   const [semanasProjeto, setSemanasProjeto] = useState<ProjetoSemana[]>([]);
   const [semanaFiltroProducao, setSemanaFiltroProducao] = useState(1);
@@ -1949,10 +1950,13 @@ export default function DubworksManager() {
       return;
     }
 
+    const comentarioLider =
+      comentarioLiderPorEntrega[entrega.id] ?? entrega.comentario_lider ?? "";
     const ok = await atualizarStatusEntregaBanco(
       entrega.id,
       status,
-      usuarioLogado?.nome || usuarioLogado?.login || "Sistema"
+      usuarioLogado?.nome || usuarioLogado?.login || "Sistema",
+      comentarioLider
     );
 
     if (!ok) {
@@ -1962,7 +1966,7 @@ export default function DubworksManager() {
 
     setEntregasProducao((anteriores) =>
       anteriores.map((item) =>
-        item.id === entrega.id ? { ...item, status } : item
+        item.id === entrega.id ? { ...item, status, comentario_lider: comentarioLider } : item
       )
     );
   }
@@ -14126,6 +14130,25 @@ export default function DubworksManager() {
                         <div><strong>Enviado em:</strong> {entregaAtiva.data_envio || "—"}</div>
                         <div><strong>Comentário do membro:</strong> {entregaAtiva.comentario || "Sem comentário"}</div>
                         <div><strong>Situação:</strong> {entregaAtiva.status === "aprovado" ? "Aprovado" : entregaAtiva.status === "regravacao" ? "Regravação solicitada" : "Aguardando análise"}</div>
+                        <label style={{ display: "grid", gap: 6 }}>
+                          <strong>Comentário da liderança</strong>
+                          <textarea
+                            aria-label="Comentário sobre a dublagem"
+                            placeholder="Deixe uma observação sobre voz, áudio, sincronização ou regravação..."
+                            rows={4}
+                            disabled={!autorizada}
+                            value={(entregaAtiva.id ? comentarioLiderPorEntrega[entregaAtiva.id] : undefined) ?? entregaAtiva.comentario_lider ?? ""}
+                            onChange={(evento) => {
+                              if (entregaAtiva.id) {
+                                setComentarioLiderPorEntrega((atual) => ({
+                                  ...atual,
+                                  [entregaAtiva.id!]: evento.target.value,
+                                }));
+                              }
+                            }}
+                            style={{ ...inputStyle, resize: "vertical" }}
+                          />
+                        </label>
                         {autorizada && (
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                             <button type="button" style={{ ...botaoSecundarioStyle, color: "#86efac" }} onClick={() => alterarStatusEntrega(entregaAtiva, "aprovado")}>✓ Aprovar</button>
