@@ -2241,9 +2241,25 @@ export async function salvarEntregasProducaoBanco(
 ): Promise<boolean> {
   if (!entregas.length) return true;
 
+  // Ao sincronizar novamente, não desfaça a aprovação/regravação nem o
+  // vínculo com o episódio salvos anteriormente no Supabase.
+  const ids = [...new Set(entregas.map((item) => item.resposta_id))];
+  const { data: existentes, error: erroExistentes } = await supabase
+    .from("entregas_producao")
+    .select("resposta_id, episodio_id, status")
+    .eq("projeto_id", Number(projetoId))
+    .in("resposta_id", ids);
+
+  if (erroExistentes) {
+    console.error("Erro ao conferir entregas já salvas:", erroExistentes);
+    return false;
+  }
+
+  const porId = new Map((existentes || []).map((item) => [String(item.resposta_id), item]));
+
   const payload = entregas.map((item) => ({
     projeto_id: Number(projetoId),
-    episodio_id: item.episodio_id ?? null,
+    episodio_id: item.episodio_id ?? porId.get(String(item.resposta_id))?.episodio_id ?? null,
     resposta_id: item.resposta_id,
     linha: item.linha ?? null,
     personagem: item.personagem,
@@ -2252,7 +2268,7 @@ export async function salvarEntregasProducaoBanco(
     semana: item.semana,
     video_url: item.video_url,
     comentario: item.comentario,
-    status: item.status || "pendente",
+    status: porId.get(String(item.resposta_id))?.status || item.status || "pendente",
     data_envio: item.data_envio || "",
   }));
 
