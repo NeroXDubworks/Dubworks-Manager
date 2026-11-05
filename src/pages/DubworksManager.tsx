@@ -418,6 +418,8 @@ export default function DubworksManager() {
   const [respostasSelecao, setRespostasSelecao] = useState<RespostaSelecao[]>(
     []
   );
+  const [buscaSelecaoTexto, setBuscaSelecaoTexto] = useState("");
+  const [buscaSelecaoAplicada, setBuscaSelecaoAplicada] = useState("");
   const [respostaSelecaoAtivaId, setRespostaSelecaoAtivaId] = useState<
     string | null
   >(null);
@@ -1960,9 +1962,25 @@ export default function DubworksManager() {
     const links = extrairLinksDrive(projeto.Observacoes);
 
     const temFormulario = Boolean(links.formSelecao || links.respostasSelecao);
+    const normalizarBusca = (valor: string) =>
+      valor.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
+    const termoBusca = normalizarBusca(buscaSelecaoAplicada.trim());
+    const respostasFiltradas = termoBusca
+      ? respostasSelecao.filter((item) =>
+          normalizarBusca(
+            [
+              item.nome,
+              item.personagem,
+              item.telefone,
+              item.timestamp,
+              statusSelecaoPorId[item.id] || item.status || "pendente",
+            ].join(" ")
+          ).includes(termoBusca)
+        )
+      : respostasSelecao;
     const respostaAtiva =
-      respostasSelecao.find((item) => item.id === respostaSelecaoAtivaId) ||
-      respostasSelecao[0] ||
+      respostasFiltradas.find((item) => item.id === respostaSelecaoAtivaId) ||
+      respostasFiltradas[0] ||
       null;
 
     const statusAtual: StatusSelecao =
@@ -2070,6 +2088,55 @@ export default function DubworksManager() {
             ))}
           </div>
 
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              alignItems: "center",
+              marginTop: 16,
+            }}
+          >
+            <input
+              type="search"
+              aria-label="Pesquisar testes da seleção"
+              placeholder="Buscar nome, personagem ou telefone..."
+              value={buscaSelecaoTexto}
+              onChange={(event) => setBuscaSelecaoTexto(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  setBuscaSelecaoAplicada(buscaSelecaoTexto.trim());
+                  setRespostaSelecaoAtivaId(null);
+                }
+              }}
+              style={{ ...inputStyle, flex: "1 1 260px", minWidth: 160 }}
+            />
+            <button
+              type="button"
+              style={botaoPrimarioStyle}
+              onClick={() => {
+                setBuscaSelecaoAplicada(buscaSelecaoTexto.trim());
+                setRespostaSelecaoAtivaId(null);
+              }}
+            >
+              🔎 Pesquisar
+            </button>
+            {buscaSelecaoAplicada && (
+              <button
+                type="button"
+                style={botaoSecundarioStyle}
+                onClick={() => {
+                  setBuscaSelecaoTexto("");
+                  setBuscaSelecaoAplicada("");
+                  setRespostaSelecaoAtivaId(null);
+                }}
+              >
+                Limpar
+              </button>
+            )}
+          </div>
+
           {respostasSelecao.length > 0 && (
             <div
               style={{
@@ -2078,7 +2145,14 @@ export default function DubworksManager() {
                 gap: 10,
               }}
             >
-              <strong style={{ color: "#f8fafc" }}>Respostas importadas</strong>
+              <strong style={{ color: "#f8fafc" }}>
+                Respostas importadas ({respostasFiltradas.length} de {respostasSelecao.length})
+              </strong>
+              {respostasFiltradas.length === 0 && (
+                <p style={{ color: "#94a3b8", margin: 0 }}>
+                  Nenhum teste encontrado. Tente outro nome, personagem ou telefone.
+                </p>
+              )}
 
               <div
                 style={{
@@ -2089,7 +2163,7 @@ export default function DubworksManager() {
                   paddingRight: 4,
                 }}
               >
-                {respostasSelecao.map((item) => {
+                {respostasFiltradas.map((item) => {
                   const ativo = respostaAtiva?.id === item.id;
                   const statusItem =
                     statusSelecaoPorId[item.id] || item.status || "pendente";
