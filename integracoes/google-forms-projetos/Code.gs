@@ -755,15 +755,31 @@ function lerRespostas_(payload, tipo) {
   ]);
   const iSemana = idx(['semana', 'semana / corte', 'episódio', 'episodio']);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
-  const iUpload =
+  // Aceita títulos diferentes dos modelos novos e antigos de Forms.
+  // A busca por cabeçalhos é tolerante a prefixos/sufixos como "(Opcional)".
+  const termosUpload =
     tipo === 'selecao'
-      ? idx(['upload do teste', 'teste', 'arquivo'])
-      : idx(['upload da entrega', 'entrega', 'arquivo']);
+      ? ['upload do teste', 'envie seu teste aqui', 'link do teste', 'faça o upload', 'faca o upload', 'teste', 'arquivo', 'upload']
+      : ['upload do arquivo', 'upload da entrega', 'link do vídeo', 'link do video', 'link da entrega', 'envie sua entrega', 'arquivo', 'upload'];
+  const iUpload = headers.findIndex(function (header) {
+    return termosUpload.some(function (termo) {
+      return header === normalizarTexto_(termo) ||
+        header.indexOf(normalizarTexto_(termo)) !== -1;
+    });
+  });
 
   const respostas = [];
 
   linhas.forEach(function (row, index) {
     if (!row.some(function (cell) { return String(cell || '').trim(); })) return;
+
+    const uploadEncontrado = valorLinha_(row, iUpload);
+    const urlFallback = row.find(function (valor, indice) {
+      return indice >= 4 && /^https:\/\/(drive|docs)\.google\.com\//i.test(String(valor || '').trim());
+    }) || '';
+    const urlDoEnvio = /^https?:\/\//i.test(uploadEncontrado)
+      ? uploadEncontrado
+      : String(urlFallback || '').trim();
 
     respostas.push({
       id: String(index + 2),
@@ -774,9 +790,9 @@ function lerRespostas_(payload, tipo) {
       telefone: valorLinha_(row, iTelefone),
       personagem: valorLinha_(row, iPersonagem),
       semana: valorLinha_(row, iSemana),
-      videoUrl: valorLinha_(row, iUpload),
-      video: valorLinha_(row, iUpload),
-      envio: valorLinha_(row, iUpload),
+      videoUrl: urlDoEnvio,
+      video: urlDoEnvio,
+      envio: urlDoEnvio,
       comentario: valorLinha_(row, iObservacao),
     });
   });
