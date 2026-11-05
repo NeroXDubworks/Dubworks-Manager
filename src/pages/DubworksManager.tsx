@@ -144,6 +144,14 @@ import {
   type ParticipanteSemanaProjeto,
 } from "../services/appServices";
 
+function entregaPertenceSemana(semana: string | undefined | null, numero: number) {
+  const texto = String(semana || "");
+  const semanas = Array.from(texto.matchAll(/semana\s*0*(\d+)/gi)).map((item) => Number(item[1]));
+  return semanas.length > 0
+    ? semanas.includes(numero)
+    : numeroSemanaEntrega(texto) === numero;
+}
+
 function statusProjetoFinalizado(status?: string) {
   return ["finalizado", "concluido", "concluida"].includes(
     normalizar(String(status || ""))
@@ -438,6 +446,7 @@ export default function DubworksManager() {
   const [entregasProducao, setEntregasProducao] = useState<EntregaProducao[]>(
     []
   );
+  const [entregaVisualizadaId, setEntregaVisualizadaId] = useState<number | null>(null);
   const [sincronizandoEntregas, setSincronizandoEntregas] = useState(false);
   const [semanasProjeto, setSemanasProjeto] = useState<ProjetoSemana[]>([]);
   const [semanaFiltroProducao, setSemanaFiltroProducao] = useState(1);
@@ -1813,7 +1822,7 @@ export default function DubworksManager() {
 
     const entregasSemana = entregasProducao.filter(
       (entrega) =>
-        numeroSemanaEntrega(entrega.semana) === semanaFiltroProducao
+        entregaPertenceSemana(entrega.semana, semanaFiltroProducao)
     );
 
     const pendentes = elenco.filter(
@@ -14005,6 +14014,135 @@ export default function DubworksManager() {
             </div>
           </div>
 
+          {(() => {
+            const daSemana = entregasProducao.filter((item) =>
+              !semanasProjeto.length ||
+              entregaPertenceSemana(item.semana, semanaFiltroProducao)
+            );
+            const entregaAtiva =
+              daSemana.find((item) => item.id === entregaVisualizadaId) ||
+              daSemana[0] ||
+              null;
+            const preview = entregaAtiva?.video_url
+              ? converterDriveParaPreview(entregaAtiva.video_url)
+              : "";
+            const autorizada = podeEditarProjeto(usuarioLogado, projetoPainel);
+
+            return (
+              <div style={{ ...painelDarkStyle, border: "1px solid rgba(56, 189, 248, 0.20)" }}>
+                <h2 style={tituloCardDarkStyle}>🎞️ Visualização e avaliação das entregas</h2>
+                <p style={{ color: "#94a3b8", margin: "6px 0 14px", fontSize: 13 }}>
+                  {semanasProjeto.length ? labelSemana(semanaFiltroProducao) : "Todas as entregas"}
+                  {" • "}{daSemana.length} envio(s). Selecione um teste para assistir e avaliar.
+                </p>
+
+                <div style={{ display: "grid", gap: 7, maxHeight: 200, overflowY: "auto", marginBottom: 16 }}>
+                  {daSemana.map((item) => (
+                    <button
+                      key={item.id ?? item.resposta_id}
+                      type="button"
+                      onClick={() => setEntregaVisualizadaId(item.id ?? null)}
+                      style={{
+                        ...botaoSecundarioStyle,
+                        width: "100%",
+                        textAlign: "left",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: 10,
+                        color: "#e2e8f0",
+                        border: entregaAtiva?.id === item.id
+                          ? "1px solid rgba(56,189,248,0.65)"
+                          : "1px solid rgba(148,163,184,0.16)",
+                        background: entregaAtiva?.id === item.id
+                          ? "rgba(56,189,248,0.12)"
+                          : "rgba(2,6,23,0.48)",
+                      }}
+                    >
+                      <span><strong>{item.personagem || "Sem personagem"}</strong> — {item.dublador || "Sem nome"}</span>
+                      <span style={{ fontSize: 12, color: item.status === "aprovado" ? "#86efac" : item.status === "regravacao" ? "#fda4af" : "#fde68a" }}>
+                        {item.status === "aprovado" ? "Aprovado" : item.status === "regravacao" ? "Regravação" : "Aguardando análise"}
+                      </span>
+                    </button>
+                  ))}
+                  {!daSemana.length && (
+                    <p style={{ color: "#94a3b8", margin: 0 }}>
+                      Nenhum envio registrado para esta semana. Use “Sincronizar formulário de entregas”.
+                    </p>
+                  )}
+                </div>
+
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: isMobile ? "1fr" : "minmax(260px,1.1fr) minmax(260px,1fr)",
+                  gap: 18,
+                }}>
+                  <div>
+                    <h3 style={{ color: "#f8fafc", margin: "0 0 10px" }}>Pré-visualização da dublagem</h3>
+                    <div style={{
+                      border: "1px solid rgba(56,189,248,0.16)",
+                      borderRadius: 14,
+                      overflow: "hidden",
+                      minHeight: 230,
+                      background: "rgba(2,6,23,0.68)",
+                      display: "grid",
+                      placeItems: "center",
+                    }}>
+                      {preview ? (
+                        <iframe
+                          title="Pré-visualização da entrega"
+                          src={preview}
+                          allow="autoplay; fullscreen"
+                          style={{ width: "100%", height: 260, border: 0 }}
+                        />
+                      ) : (
+                        <p style={{ color: "#94a3b8", textAlign: "center", padding: 18 }}>
+                          {entregaAtiva
+                            ? "Arquivo não identificado. Sincronize o formulário para recuperar o link."
+                            : "Selecione uma entrega para visualizar o vídeo."}
+                        </p>
+                      )}
+                    </div>
+                    {entregaAtiva?.video_url && (
+                      <a
+                        href={entregaAtiva.video_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ display: "inline-block", marginTop: 10, color: "#38bdf8" }}
+                      >
+                        Abrir vídeo em nova aba ↗
+                      </a>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 style={{ color: "#f8fafc", margin: "0 0 10px" }}>Detalhes e avaliação</h3>
+                    {entregaAtiva ? (
+                      <div style={{ display: "grid", gap: 10, color: "#cbd5e1" }}>
+                        <div><strong>Personagem:</strong> {entregaAtiva.personagem || "—"}</div>
+                        <div><strong>Dublador:</strong> {entregaAtiva.dublador || "—"}</div>
+                        <div><strong>Semana/corte:</strong> {entregaAtiva.semana || "—"}</div>
+                        <div><strong>Enviado em:</strong> {entregaAtiva.data_envio || "—"}</div>
+                        <div><strong>Comentário do membro:</strong> {entregaAtiva.comentario || "Sem comentário"}</div>
+                        <div><strong>Situação:</strong> {entregaAtiva.status === "aprovado" ? "Aprovado" : entregaAtiva.status === "regravacao" ? "Regravação solicitada" : "Aguardando análise"}</div>
+                        {autorizada && (
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                            <button type="button" style={{ ...botaoSecundarioStyle, color: "#86efac" }} onClick={() => alterarStatusEntrega(entregaAtiva, "aprovado")}>✓ Aprovar</button>
+                            <button type="button" style={{ ...botaoSecundarioStyle, color: "#fda4af" }} onClick={() => alterarStatusEntrega(entregaAtiva, "regravacao")}>↻ Pedir regravação</button>
+                            <button type="button" style={botaoSecundarioStyle} onClick={() => alterarStatusEntrega(entregaAtiva, "pendente")}>Pendente</button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p style={{ color: "#94a3b8" }}>Nenhuma entrega selecionada.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={painelDarkStyle}>
             <div
               style={{
@@ -14490,8 +14628,7 @@ export default function DubworksManager() {
                   const elenco = participantesSemanaProjeto;
                   const entregasSemana = entregasProducao.filter(
                     (entrega) =>
-                      numeroSemanaEntrega(entrega.semana) ===
-                      semanaFiltroProducao
+                      entregaPertenceSemana(entrega.semana, semanaFiltroProducao)
                   );
                   const totalElenco = elenco.length;
                   const totalEntregues = elenco.filter((item) =>
