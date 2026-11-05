@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const PROJECT_FORMS_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbx4bopNipOGkZk5eEGPaqLVtLYJ_exZmxCni10EflhaeTxLNEXt79OcpCT0h8m5PeYC/exec";
+  "https://script.google.com/macros/s/AKfycbxl9oYifkr1hos9WIvBBrMXHtI0UsV2Rqqf-yacD895fQkvhG5vTmOIn1bkItxw4KWN/exec";
 
 const FORM_TEMPLATE_SELECTION_WITH_UPLOAD =
   Deno.env.get("GOOGLE_FORMS_SELECTION_UPLOAD_TEMPLATE_ID") ||
@@ -55,6 +55,29 @@ Deno.serve(async (req) => {
       const accessToken = await obterGoogleDriveAccessToken();
       const resultado = await prepararTemplatesForms(body, accessToken);
       return json(resultado, 200);
+    }
+
+    if (action === "conferir_destino_selecao") {
+      const nome = limparNomeProjeto(body?.projectName);
+      const pastaFalas = extrairId(body?.falasTesteFolderId);
+      const pastaRespostas = extrairId(body?.respostasSelecaoFolderId);
+      if (!nome || !pastaFalas || !pastaRespostas || pastaFalas === pastaRespostas) {
+        throw new HttpError(400, "Informe duas pastas distintas de Falas Teste e Respostas da seleção.");
+      }
+      const accessToken = await obterGoogleDriveAccessToken();
+      const [origem, destino] = await Promise.all([
+        obterArquivoDrive(pastaFalas, accessToken),
+        obterArquivoDrive(pastaRespostas, accessToken),
+      ]);
+      const origemPais = Array.isArray(origem?.parents) ? origem.parents : [];
+      const destinoPais = Array.isArray(destino?.parents) ? destino.parents : [];
+      if (!origemPais.length || !origemPais.some((id: string) => destinoPais.includes(id))) {
+        throw new HttpError(400, "Falas Teste e Respostas precisam ser subpastas da mesma pasta Seleção.");
+      }
+      const arquivosRealocados = await retirarFormulariosDaPastaFalasTeste(
+        pastaFalas, pastaRespostas, nome, "", accessToken
+      );
+      return json({ ok: true, arquivosRealocados }, 200);
     }
 
     if (body?.action === "criar_estrutura_episodio") {
@@ -104,10 +127,42 @@ Deno.serve(async (req) => {
         );
       }
 
-      const resultado = await chamarAppsScript({
-        ...body,
-        access_token: usuario.token,
-      });
+      // Corrige referência antiga de planilha no fluxo de seleção do projeto 151.
+      // Não cria nem modifica respostas, formulários ou avaliações.
+      const payloadForms = { ...body, access_token: usuario.token };
+      if (projectId === 151 && action === "ler_respostas_selecao") {
+        payloadForms.spreadsheetId = "1dRjzcVJKgbH69bBvAWDrGI9oMEt20x5o_Sall6sYEFU";
+      }
+      const resultado = await chamarAppsScript(payloadForms);
+      // O Apps Script antigo não reconhece alguns títulos de perguntas de upload.
+      // Preenche URLs por número de linha, sem alterar status, ID ou avaliações.
+      if (
+        (action === "ler_respostas_selecao" || action === "ler_respostas_entregas") &&
+        Array.isArray(resultado?.respostas) &&
+        resultado.respostas.length
+      ) {
+        const planilhaId = extrairId(payloadForms.spreadsheetId);
+        if (planilhaId) {
+          try {
+            const tokenPlanilha = await obterGoogleDriveAccessToken();
+            const urlsPorLinha = await obterLinksVideoPlanilha(
+              planilhaId,
+              action === "ler_respostas_selecao" ? "selecao" : "entregas",
+              tokenPlanilha
+            );
+            resultado.respostas = resultado.respostas.map((resposta: any) => {
+              if (resposta.videoUrl || resposta.video || resposta.envio) return resposta;
+              const linha = Number(resposta.linha || resposta.id);
+              const videoUrl = urlsPorLinha.get(linha);
+              if (!videoUrl) return resposta;
+              return { ...resposta, videoUrl, video: videoUrl, envio: videoUrl };
+            });
+          } catch (erro) {
+            console.warn("Não foi possível complementar os links de upload:", erro);
+            // Mantém as respostas do Apps Script mesmo se o Sheets API estiver indisponível.
+          }
+        }
+      }
       return json(resultado, 200);
     }
 
@@ -482,6 +537,9 @@ async function prepararTemplatesForms(body: any, token: string) {
       "Nome do projeto e pastas de Seleção/Entregas são obrigatórios."
     );
   }
+  if (falasTesteFolderId && (falasTesteFolderId === respostasSelecaoFolderId || falasTesteFolderId === entregasFolderId)) {
+    throw new HttpError(400, "Falas Teste deve ser uma pasta separada: jamais destino de Forms ou planilhas.");
+  }
 
   await renomearArquivoDrive(
     respostasSelecaoFolderId,
@@ -750,35 +808,28 @@ async function retirarFormulariosDaPastaFalasTeste(
   falasTesteFolderId: string,
   respostasSelecaoFolderId: string,
   projectName: string,
-  formCorretoId: string,
+  _formCorretoId: string,
   token: string
-) {
-  const forms = await listarArquivosFilhosPorMime(
-    falasTesteFolderId,
-    "application/vnd.google-apps.form",
-    token
-  );
-
-  const chaveProjeto = normalizarTextoDrive(projectName);
-
-  for (const form of forms) {
-    if (form.id === formCorretoId) continue;
-
-    const nomeNormalizado = normalizarTextoDrive(form.name);
-    if (
-      !nomeNormalizado.includes(chaveProjeto) &&
-      !nomeNormalizado.includes("selecao")
-    ) {
-      continue;
-    }
-
-    await moverArquivoDrive(form.id, respostasSelecaoFolderId, token);
-    await renomearArquivoDrive(
-      form.id,
-      `[OBSOLETO] ${form.name || "[Seleção] " + projectName}`,
-      token
-    );
+): Promise<number> {
+  if (falasTesteFolderId === respostasSelecaoFolderId) {
+    throw new HttpError(400, "A pasta Falas Teste não pode ser a pasta Respostas.");
   }
+  // Falas Teste é compartilhada com membros. Nunca deixar arquivos de sistema
+  // (Forms e planilhas do projeto) nela; não tocar em falas/mídias dos membros.
+  const chaveProjeto = normalizarTextoDrive(projectName);
+  let realocados = 0;
+  for (const mime of [
+    "application/vnd.google-apps.form",
+    "application/vnd.google-apps.spreadsheet",
+  ]) {
+    const arquivos = await listarArquivosFilhosPorMime(falasTesteFolderId, mime, token);
+    for (const arquivo of arquivos) {
+      if (!normalizarTextoDrive(arquivo.name).includes(chaveProjeto)) continue;
+      await moverArquivoDrive(arquivo.id, respostasSelecaoFolderId, token);
+      realocados++;
+    }
+  }
+  return realocados;
 }
 
 function normalizarTextoDrive(valor: unknown) {
@@ -1126,6 +1177,55 @@ async function criarEstruturaEpisodio(body: any, accessToken: string) {
     finalizadoId: finalizado.id,
     finalizado: finalizado.webViewLink,
   };
+}
+
+async function obterLinksVideoPlanilha(
+  spreadsheetId: string,
+  tipo: "selecao" | "entregas",
+  token: string
+): Promise<Map<number, string>> {
+  const url =
+    "https://sheets.googleapis.com/v4/spreadsheets/" +
+    encodeURIComponent(spreadsheetId) +
+    "/values/" + encodeURIComponent("A1:AZ") +
+    "?valueRenderOption=FORMATTED_VALUE";
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Google Sheets HTTP ${response.status} ao ler uploads`);
+  }
+  const data = await response.json();
+  const linhas: string[][] = Array.isArray(data.values) ? data.values : [];
+  if (!linhas.length) return new Map();
+  const normalizar = (value: unknown) => String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  const cabecalhos = (linhas[0] || []).map(normalizar);
+  const termos = tipo === "selecao"
+    ? ["upload do teste", "envie seu teste aqui", "link do teste", "teste", "arquivo", "video do teste", "video", "upload"]
+    : ["upload da entrega", "envie sua entrega aqui", "link da entrega", "entrega", "arquivo", "video da entrega", "video", "upload"];
+  const col = cabecalhos.findIndex((nome) =>
+    termos.some((t) => nome === t || (nome.includes(t) && !nome.includes("nome")))
+  );
+  const pareceLinkDeVideo = (value: unknown) => {
+    const valueStr = String(value || "").trim();
+    return /^https:\/\/(drive\.google\.com|docs\.google\.com)\//i.test(valueStr);
+  };
+  const urls = new Map<number, string>();
+  for (let i = 1; i < linhas.length; i++) {
+    const row = linhas[i] || [];
+    const preferido = col >= 0 ? row[col] : "";
+    const candidato = pareceLinkDeVideo(preferido)
+      ? preferido
+      : row.find((item, indice) => indice >= 4 && pareceLinkDeVideo(item));
+    if (candidato && pareceLinkDeVideo(candidato)) {
+      urls.set(i + 1, String(candidato).trim());
+    }
+  }
+  return urls;
 }
 
 async function chamarAppsScript(payload: any) {
