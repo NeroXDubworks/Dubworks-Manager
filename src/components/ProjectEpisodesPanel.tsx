@@ -3,6 +3,9 @@ import type { ElencoItem, Projeto } from "../types";
 import {
   enfileirarLembreteWhatsapp,
   criarAtualizarFormulariosProjeto,
+  lerRespostasEntregasViaEdge,
+  carregarEntregasProducaoBanco,
+  salvarEntregasProducaoBanco,
   extrairGoogleFileId,
   extrairGoogleFolderId,
   extrairLinksDrive,
@@ -132,6 +135,7 @@ export default function ProjectEpisodesPanel({
   const [vagas, setVagas] = useState<SelecaoVaga[]>([]);
   const [historico, setHistorico] = useState<EpisodioHistorico[]>([]);
   const [carregando, setCarregando] = useState(false);
+  const [sincronizandoEntregasEpisodio, setSincronizandoEntregasEpisodio] = useState(false);
   const [erro, setErro] = useState("");
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [novo, setNovo] = useState({
@@ -225,6 +229,78 @@ export default function ProjectEpisodesPanel({
       setErro(e?.message || "Não foi possível carregar os dados do episódio.");
     } finally {
       setCarregando(false);
+    }
+  }
+
+  async function sincronizarEntregasFormulario() {
+    if (!podeEditar || !episodio || sincronizandoEntregasEpisodio) return;
+
+    try {
+      setSincronizandoEntregasEpisodio(true);
+      setErro("");
+      const links = extrairLinksDrive(projeto.Observacoes || "");
+      if (!links.planilhaEntregas && !links.entregasProjeto && !links.projeto) {
+        throw new Error("A planilha de entregas ainda não está vinculada ao projeto.");
+      }
+
+      const [respostas, salvasAnteriormente] = await Promise.all([
+        lerRespostasEntregasViaEdge(
+          projeto.ID,
+          links.planilhaEntregas || "",
+          links.entregasProjeto || links.projeto || ""
+        ),
+        carregarEntregasProducaoBanco(projeto.ID),
+      ]);
+
+      const porResposta = new Map(
+        salvasAnteriormente.map((item) => [String(item.resposta_id), item])
+      );
+
+      const respostasVinculadas = respostas.map((resposta) => {
+        const anterior = porResposta.get(String(resposta.resposta_id));
+        // "Semana 01" não identifica um episódio. "EP 01" identifica.
+        const rotulo = String(resposta.semana || "");
+        const encontrado = rotulo.match(/\b(?:EP|Epis[oó]dio)\s*0*(\d+)\b/i);
+        const episodioIndicado = encontrado
+          ? episodios.find((item) => item.numero === Number(encontrado[1]))
+          : null;
+        // Para projetos de episódio único, vinculamos também as entregas legadas.
+        // Para múltiplos episódios, nunca atribuímos uma semana arbitrariamente.
+        const episodioAssociado =
+          episodioIndicado?.id ??
+          anterior?.episodio_id ??
+          (episodios.length === 1 ? episodios[0].id : null);
+
+        return {
+          ...resposta,
+          projeto_id: Number(projeto.ID),
+          episodio_id: episodioAssociado,
+          status: anterior?.status || resposta.status || "pendente",
+        };
+      });
+
+      const ok = await salvarEntregasProducaoBanco(projeto.ID, respostasVinculadas);
+      if (!ok) throw new Error("Não foi possível salvar as respostas no Supabase.");
+
+      await recarregarDetalhes(episodio.id);
+      const desteEpisodio = respostasVinculadas.filter(
+        (item) => item.episodio_id === episodio.id
+      ).length;
+      const semVinculo = respostasVinculadas.filter(
+        (item) => item.episodio_id == null
+      ).length;
+      alert(
+        `Sincronização concluída: ${respostas.length} resposta(s) lida(s) do Forms; ${desteEpisodio} vinculada(s) a este episódio.` +
+        (semVinculo
+          ? ` ${semVinculo} resposta(s) sem episódio identificado. Verifique o campo Episódio do Forms.`
+          : "")
+      );
+    } catch (erro: any) {
+      const mensagem = erro?.message || "Não foi possível sincronizar as entregas.";
+      setErro(mensagem);
+      alert("Erro ao sincronizar entregas: " + mensagem);
+    } finally {
+      setSincronizandoEntregasEpisodio(false);
     }
   }
 
@@ -897,6 +973,16 @@ export default function ProjectEpisodesPanel({
 
                   {podeEditar && (
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        style={secondary}
+                        disabled={sincronizandoEntregasEpisodio}
+                        onClick={sincronizarEntregasFormulario}
+                      >
+                        {sincronizandoEntregasEpisodio
+                          ? "Sincronizando entregas..."
+                          : "↻ Sincronizar entregas"}
+                      </button>
                       {episodio.status === "nao_iniciado" && (
                         <button style={secondary} onClick={iniciarProducao}>
                           Iniciar produção
