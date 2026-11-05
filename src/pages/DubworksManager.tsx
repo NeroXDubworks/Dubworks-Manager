@@ -297,9 +297,8 @@ export default function DubworksManager() {
   const [registroSemanalTexto, setRegistroSemanalTexto] = useState("");
   const [abaProjeto, setAbaProjeto] = useState<
     | "informacoes"
-    | "episodios"
+    | "producao"
     | "selecao"
-    | "elenco"
     | "registros"
     | "drive"
     | "atividades"
@@ -13873,9 +13872,8 @@ export default function DubworksManager() {
         >
           {[
             ["informacoes", "ⓘ Informações"],
-            ["episodios", "🎬 Episódios"],
+            ["producao", "🎬 Produção"],
             ["selecao", "🎭 Seleção"],
-            ["elenco", "🎙️ Banco & Semanas"],
             ["registros", "▣ Registro"],
             ["atividades", "↔ Atividade"],
             ["historico", "◷ Histórico"],
@@ -13940,20 +13938,76 @@ export default function DubworksManager() {
         </div>
       )}
 
-      {abaProjeto === "episodios" && projetoPainel && (
-        <ProjectEpisodesPanel
-          projeto={projetoPainel}
-          usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
-          podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
-        />
+      {abaProjeto === "producao" && projetoPainel && (
+        <section
+          id="dw-producao-episodios"
+          style={{ display: "grid", gap: 14, scrollMarginTop: 22 }}
+        >
+          <div
+            style={{
+              ...painelDarkStyle,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ ...tituloCardDarkStyle, marginBottom: 4 }}>🎬 Produção do Projeto</h2>
+              <p style={{ color: "#94a3b8", margin: 0, fontSize: 13 }}>
+                Episódios, elenco, semanas e avaliações em um único lugar.
+              </p>
+            </div>
+            <button
+              type="button"
+              style={botaoSecundarioStyle}
+              onClick={() => document.getElementById("dw-producao-banco")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              🎙️ Ir para Banco & Semanas ↓
+            </button>
+          </div>
+          <ProjectEpisodesPanel
+            projeto={projetoPainel}
+            usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
+            podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
+          />
+        </section>
       )}
 
       {abaProjeto === "selecao" &&
         projetoPainel &&
         renderAbaSelecaoVisual(projetoPainel)}
 
-      {abaProjeto === "elenco" && projetoPainel && (
-        <div style={{ display: "grid", gap: 18 }}>
+      {abaProjeto === "producao" && projetoPainel && (
+        <div
+          id="dw-producao-banco"
+          style={{ display: "grid", gap: 18, scrollMarginTop: 22 }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 12,
+              marginTop: 6,
+            }}
+          >
+            <div>
+              <h2 style={{ ...tituloCardDarkStyle, marginBottom: 4 }}>🎙️ Banco & Semanas</h2>
+              <p style={{ color: "#94a3b8", fontSize: 13, margin: 0 }}>
+                Gestão do elenco, participantes por semana e avaliação das gravações.
+              </p>
+            </div>
+            <button
+              type="button"
+              style={botaoSecundarioStyle}
+              onClick={() => document.getElementById("dw-producao-episodios")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              ↑ Voltar aos episódios
+            </button>
+          </div>
           <div
             style={{
               ...painelDarkStyle,
