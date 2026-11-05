@@ -2304,13 +2304,15 @@ export async function carregarEntregasProducaoBanco(
 export async function atualizarStatusEntregaBanco(
   entregaId: number,
   status: "pendente" | "aprovado" | "regravacao",
-  avaliadoPor: string
+  avaliadoPor: string,
+  comentarioLider?: string
 ): Promise<boolean> {
   const { error } = await supabase
     .from("entregas_producao")
     .update({
       status,
       avaliado_por: avaliadoPor,
+      ...(comentarioLider !== undefined ? { comentario_lider: comentarioLider } : {}),
       data_avaliacao: new Date().toISOString(),
       atualizado_em: new Date().toISOString(),
     })
