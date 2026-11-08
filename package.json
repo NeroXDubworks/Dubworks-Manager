@@ -6,7 +6,27 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:members": "node tests/members-script.test.mjs && node tests/members-api.test.mjs && node tests/members-ui.test.mjs && node tests/login-hook-order.test.mjs && node tests/member-filters.test.mjs && node tests/member-filter-panel.test.mjs && node tests/daily-report.test.mjs && node tests/daily-report-api.test.mjs && node tests/daily-report-script.test.mjs && node tests/daily-report-ui.test.mjs && node tests/whatsapp-api.test.mjs && node tests/whatsapp-worker.test.mjs && node tests/whatsapp-ui.test.mjs && node tests/whatsapp-connection.test.mjs && node tests/whatsapp-browser.test.mjs && node tests/dev-watch.test.mjs && node tests/member-points-script.test.mjs && node tests/member-points-api.test.mjs && node tests/member-points-ui.test.mjs",
+    "bot:install": "node integracoes/whatsapp-bot/install.cjs",
+    "bot:start": "node integracoes/whatsapp-bot/install-browser.cjs && node integracoes/whatsapp-bot/server.cjs",
+    "start:all": "node integracoes/whatsapp-bot/start-manager.cjs",
+    "bot:browser": "node integracoes/whatsapp-bot/install-browser.cjs",
+    "test:users": "node tests/users-permissions.test.mjs && node tests/users-ui.test.mjs",
+    "test:member-projects": "node tests/member-projects-api.test.mjs && node tests/member-projects-ui.test.mjs",
+    "test:navigation": "node tests/manager-loading.test.mjs && node tests/manager-runtime.test.mjs",
+    "test:routes-production": "node tests/manager-production.test.mjs",
+    "test:member-performance": "node tests/member-performance-api.test.mjs && node tests/member-performance-ui.test.mjs",
+    "test:warnings": "node tests/warning-workflow.test.mjs && node tests/warning-ui.test.mjs && node tests/warning-details-ui.test.mjs",
+    "test:warnings-db": "node tests/warning-database.test.mjs",
+    "test:user-access": "node tests/user-access-api.test.mjs && node tests/user-access-drive.test.mjs && node tests/user-access-ui.test.mjs",
+    "test:user-access-db": "node tests/user-access-database.test.mjs",
+    "test:reanalysis": "node tests/warning-reanalysis-script.test.mjs && node tests/warning-reanalysis-ui.test.mjs",
+    "test:events": "node tests/events-center.test.mjs && node tests/events-form-ui.test.mjs && node tests/events-v45-ui.test.mjs && node tests/events-automation-api.test.mjs && node tests/events-automation-script.test.mjs",
+    "test:members-speed": "node tests/v44-members-performance.test.mjs",
+    "test:v44-db": "node tests/v44-database.test.mjs && node tests/v44-activation.test.mjs",
+    "test:events-db": "node tests/v45-events-db.test.mjs",
+    "test:events-local": "node tests/events-local-route.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
