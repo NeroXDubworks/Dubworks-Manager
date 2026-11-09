@@ -1646,7 +1646,8 @@ export default function DubworksManager() {
       const respostas = await lerRespostasEntregasViaEdge(
         projeto.ID,
         planilhaEntregas,
-        pastaEntregas
+        pastaEntregas,
+        links.formEntregasId || links.formEntregas || ""
       );
 
       if (respostas.length === 0) {
