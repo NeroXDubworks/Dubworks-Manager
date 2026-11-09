@@ -796,8 +796,9 @@ function lerRespostas_(payload, tipo) {
     'escolha o personagem',
   ]);
   const iSemana = idx([
-    'semana', 'semana / corte', 'semana/corte',
-    'semena/corte', 'semena / corte', 'episódio', 'episodio',
+    'semana', 'semana.', 'semana / corte', 'semana/corte',
+    'semena/corte', 'semena / corte',
+    'corte referente a semana', 'episódio', 'episodio',
   ]);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
   // Aceita títulos diferentes dos modelos novos e antigos de Forms.
@@ -814,10 +815,45 @@ function lerRespostas_(payload, tipo) {
     });
   });
 
+  // Alguns Forms antigos foram reutilizados: possuem testes da seleção
+  // e somente parte das respostas representa entregas de produção.
+  const cabecalhoDeTeste = headers.some(function (h) {
+    return h.indexOf('personagem do teste') !== -1 ||
+      h.indexOf('video do teste') !== -1 ||
+      h.indexOf('link teste') !== -1;
+  });
+  const possuiCampoProducao = headers.some(function (h) {
+    return /semana|semena|episodio|corte|parte|dublagem|dublado|entrega/.test(h);
+  });
+  const linhasPreenchidas = linhas.filter(function (row) {
+    return row.some(function (cell) { return String(cell || '').trim(); });
+  });
+
+  if (tipo === 'entregas' && cabecalhoDeTeste &&
+      !possuiCampoProducao && linhasPreenchidas.length) {
+    throw new Error(
+      'A planilha cadastrada contém respostas de teste de seleção, ' +
+      'sem campos de produção. Vincule o formulário/planilha de entregas corretos.'
+    );
+  }
+
+  // Em planilhas mistas como a de Digital Circus, manter apenas as
+  // respostas com Semana/Corte informado, preservando as linhas reais.
+  const filtrarTestesDaPlanilhaMista =
+    tipo === 'entregas' && cabecalhoDeTeste && iSemana >= 0 &&
+    linhasPreenchidas.some(function (row) {
+      return Boolean(valorLinha_(row, iSemana));
+    });
+  let ignoradasSelecao = 0;
   const respostas = [];
 
   linhas.forEach(function (row, index) {
     if (!row.some(function (cell) { return String(cell || '').trim(); })) return;
+
+    if (filtrarTestesDaPlanilhaMista && !valorLinha_(row, iSemana)) {
+      ignoradasSelecao++;
+      return;
+    }
 
     const uploadEncontrado = valorLinha_(row, iUpload);
     const urlFallback = row.find(function (valor, indice) {
@@ -849,7 +885,10 @@ function lerRespostas_(payload, tipo) {
     spreadsheetId: spreadsheetId,
     spreadsheetUrl: ss.getUrl(),
     sheetName: sheet.getName(),
-    aviso: respostas.length ? '' : 'A planilha está acessível, mas ainda não recebeu envios.',
+    ignoradasSelecao: ignoradasSelecao,
+    aviso: respostas.length
+      ? (ignoradasSelecao ? ignoradasSelecao + ' teste(s) de seleção foram ignorados.' : '')
+      : 'A planilha está acessível, mas ainda não contém entregas de produção.',
   };
 }
 
