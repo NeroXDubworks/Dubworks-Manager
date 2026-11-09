@@ -363,8 +363,8 @@ export default function ProjectEpisodesPanel({
       personagensEntregas,
       elenco: projeto.Elenco || [],
       episodios: episodiosForm,
-      existingSelectionFormId: extrairGoogleFileId(links.formSelecao || ""),
-      existingDeliveriesFormId: extrairGoogleFileId(links.formEntregas || ""),
+      existingSelectionFormId: links.formSelecaoId || extrairGoogleFileId(links.formSelecao || ""),
+      existingDeliveriesFormId: links.formEntregasId || extrairGoogleFileId(links.formEntregas || ""),
     });
 
     const lerUrl = (valor: any) =>
@@ -379,6 +379,14 @@ export default function ProjectEpisodesPanel({
 
     const novosLinks = {
       ...links,
+      // O link público é usado pelos dubladores; o ID interno evita
+      // a criação de cópias do Form ao atualizar episódios e escalações.
+      formSelecaoId: String(
+        retorno?.formSelecao?.id || links.formSelecaoId || extrairGoogleFileId(links.formSelecao || "")
+      ),
+      formEntregasId: String(
+        retorno?.formEntregas?.id || links.formEntregasId || extrairGoogleFileId(links.formEntregas || "")
+      ),
       formSelecao:
         lerUrl(retorno?.formSelecao) || links.formSelecao || "",
       formEntregas:
