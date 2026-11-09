@@ -3306,6 +3306,8 @@ export function extrairLinksDrive(observacoes?: string) {
       entregasProjeto: "",
       formSelecao: "",
       formEntregas: "",
+      formSelecaoId: "",
+      formEntregasId: "",
       planilhaSelecao: "",
       planilhaEntregas: "",
     };
@@ -3327,6 +3329,8 @@ export function extrairLinksDrive(observacoes?: string) {
       entregasProjeto: "",
       formSelecao: "",
       formEntregas: "",
+      formSelecaoId: "",
+      formEntregasId: "",
       planilhaSelecao: "",
       planilhaEntregas: "",
       ...JSON.parse(json),
@@ -3345,6 +3349,8 @@ export function extrairLinksDrive(observacoes?: string) {
       entregasProjeto: "",
       formSelecao: "",
       formEntregas: "",
+      formSelecaoId: "",
+      formEntregasId: "",
       planilhaSelecao: "",
       planilhaEntregas: "",
     };
