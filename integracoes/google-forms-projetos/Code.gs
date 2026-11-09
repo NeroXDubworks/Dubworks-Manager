@@ -879,19 +879,102 @@ function lerRespostas_(payload, tipo) {
     });
   });
 
+
+  // Se o Form ainda recebe uploads, mas a planilha foi recriada ou desvinculada,
+  // recuperar as respostas pelo ID nativo sem criar/mover nenhum documento.
+  const peloFormulario = (!respostas.length && tipo === 'entregas')
+    ? lerRespostasDiretoDoFormulario_(payload)
+    : [];
+  const resultado = respostas.length ? respostas : peloFormulario;
+
   return {
     ok: true,
-    respostas: respostas,
+    respostas: resultado,
     spreadsheetId: spreadsheetId,
     spreadsheetUrl: ss.getUrl(),
     sheetName: sheet.getName(),
+    origem: peloFormulario.length ? 'formulario' : 'planilha',
     ignoradasSelecao: ignoradasSelecao,
-    aviso: respostas.length
-      ? (ignoradasSelecao ? ignoradasSelecao + ' teste(s) de seleção foram ignorados.' : '')
-      : (ignoradasSelecao
-          ? 'A planilha contém testes antigos, mas nenhuma entrega identificada.'
-          : 'A planilha está acessível, mas ainda não recebeu envios.'),
+    aviso: peloFormulario.length
+      ? 'A planilha está vazia; os envios foram recuperados diretamente do formulário.'
+      : (respostas.length
+          ? (ignoradasSelecao ? ignoradasSelecao + ' teste(s) de seleção foram ignorados.' : '')
+          : (ignoradasSelecao
+              ? 'A planilha contém testes antigos, mas nenhuma entrega identificada.'
+              : 'A planilha está acessível, mas ainda não recebeu envios.')),
   };
+}
+
+// Fallback de leitura para Forms antigos com upload, mas sem planilha ligada.
+// Só é usado quando o ID de edição é conhecido; o link público não basta.
+function lerRespostasDiretoDoFormulario_(payload) {
+  const formId = extrairId_(payload.formId || payload.formEntregasId || '');
+  if (!formId) return [];
+
+  const form = FormApp.openById(formId);
+  const registros = form.getResponses();
+
+  function textoResposta_(valor) {
+    return Array.isArray(valor)
+      ? valor.map(function (item) { return String(item || '').trim(); }).filter(Boolean).join(', ')
+      : String(valor || '').trim();
+  }
+
+  function urlDeUpload_(valor) {
+    const lista = Array.isArray(valor) ? valor : [valor];
+    for (let i = 0; i < lista.length; i++) {
+      const dado = String(lista[i] || '').trim();
+      if (/^https?:\/\//i.test(dado)) return dado;
+      // Respostas a questões FILE_UPLOAD do Forms são IDs de arquivos Drive.
+      if (/^[a-zA-Z0-9_-]{20,}$/.test(dado)) {
+        return 'https://drive.google.com/file/d/' + dado + '/view';
+      }
+    }
+    return '';
+  }
+
+  return registros.map(function (response, index) {
+    const campos = response.getItemResponses().map(function (item) {
+      return {
+        titulo: normalizarTexto_(item.getItem().getTitle()),
+        tipo: String(item.getItem().getType() || ''),
+        valor: item.getResponse(),
+      };
+    });
+
+    function campo_(padrao) {
+      return campos.find(function (item) { return padrao.test(item.titulo); });
+    }
+
+    const nome = campo_(/nome|dublador|membro/);
+    const telefone = campo_(/telefone|whatsapp|n[uú]mero/);
+    const personagem = campo_(/personagem/);
+    const semana = campo_(/semana|semena|epis[oó]dio|corte|parte/);
+    const comentario = campo_(/observa[cç][aã]o|coment[aá]rio/);
+    const upload = campos.find(function (item) {
+      return item.tipo.toUpperCase().indexOf('FILE_UPLOAD') !== -1;
+    }) || campo_(/upload|v[ií]deo|[aá]udio|arquivo|link/);
+    const timestamp = response.getTimestamp();
+
+    return {
+      // Preserva compatibilidade com as linhas quando a planilha for ligada
+      // e as respostas forem exportadas em ordem cronológica.
+      id: String(index + 2),
+      linha: index + 2,
+      timestamp: timestamp && timestamp.toISOString
+        ? timestamp.toISOString()
+        : String(timestamp || ''),
+      nome: nome ? textoResposta_(nome.valor) : '',
+      dublador: nome ? textoResposta_(nome.valor) : '',
+      telefone: telefone ? textoResposta_(telefone.valor) : '',
+      personagem: personagem ? textoResposta_(personagem.valor) : '',
+      semana: semana ? textoResposta_(semana.valor) : '',
+      videoUrl: upload ? urlDeUpload_(upload.valor) : '',
+      video: upload ? urlDeUpload_(upload.valor) : '',
+      envio: upload ? urlDeUpload_(upload.valor) : '',
+      comentario: comentario ? textoResposta_(comentario.valor) : '',
+    };
+  });
 }
 
 function localizarPlanilhaNaPasta_(folderId, tipo) {
