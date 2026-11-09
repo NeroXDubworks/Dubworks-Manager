@@ -771,6 +771,7 @@ function lerRespostas_(payload, tipo) {
         return limpo === alias ||
           limpo.indexOf(alias + ':') === 0 ||
           limpo.indexOf(alias + ' (') === 0 ||
+          limpo.indexOf(alias + ' ') === 0 ||
           limpo.indexOf(alias + ' /') === 0;
       });
     });
