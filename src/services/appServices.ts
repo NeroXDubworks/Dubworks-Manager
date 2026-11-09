@@ -1903,9 +1903,20 @@ async function invocarIntegracaoDrive<T = any>(body: Record<string, unknown>): P
 
   if (error) {
     console.error("Erro da Edge Function Google Drive:", error);
-    throw new Error(
-      error.message || "Não foi possível executar a integração com o Google Drive."
-    );
+    // supabase-js resume respostas HTTP 4xx/5xx como "non-2xx status code".
+    // A mensagem específica enviada pela função fica em error.context (Response).
+    // Ler o corpo permite exibir erros de autenticação/Apps Script com precisão.
+    let mensagem = error.message || "Não foi possível executar a integração com o Google Drive.";
+    const respostaErro = (error as any).context;
+    if (respostaErro && typeof respostaErro.json === "function") {
+      try {
+        const detalhe = await respostaErro.json();
+        mensagem = String(detalhe?.error || detalhe?.message || mensagem);
+      } catch {
+        // Mantém o erro original quando a resposta não é JSON.
+      }
+    }
+    throw new Error(mensagem);
   }
 
   if (!data) {
