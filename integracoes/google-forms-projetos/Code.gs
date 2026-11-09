@@ -888,7 +888,9 @@ function lerRespostas_(payload, tipo) {
     ignoradasSelecao: ignoradasSelecao,
     aviso: respostas.length
       ? (ignoradasSelecao ? ignoradasSelecao + ' teste(s) de seleção foram ignorados.' : '')
-      : 'A planilha está acessível, mas ainda não contém entregas de produção.',
+      : (ignoradasSelecao
+          ? 'A planilha contém testes antigos, mas nenhuma entrega identificada.'
+          : 'A planilha está acessível, mas ainda não recebeu envios.'),
   };
 }
 
