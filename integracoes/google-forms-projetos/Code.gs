@@ -829,13 +829,13 @@ function lerRespostas_(payload, tipo) {
     return row.some(function (cell) { return String(cell || '').trim(); });
   });
 
-  if (tipo === 'entregas' && cabecalhoDeTeste &&
-      !possuiCampoProducao && linhasPreenchidas.length) {
-    throw new Error(
-      'A planilha cadastrada contém respostas de teste de seleção, ' +
-      'sem campos de produção. Vincule o formulário/planilha de entregas corretos.'
-    );
-  }
+  // Não bloquear formulários antigos só pelo nome das perguntas:
+  // projetos criados manualmente reutilizavam modelos "Vídeo do teste"
+  // para receber gravações reais. A pasta/origem deve ser conferida
+  // separadamente; aqui preservamos essas entregas legadas.
+  const cabecalhoLegadoAmbiguo =
+    tipo === 'entregas' && cabecalhoDeTeste && !possuiCampoProducao &&
+    linhasPreenchidas.length > 0;
 
   // Em planilhas mistas como a de Digital Circus, manter apenas as
   // respostas com Semana/Corte informado, preservando as linhas reais.
@@ -895,10 +895,15 @@ function lerRespostas_(payload, tipo) {
     sheetName: sheet.getName(),
     origem: peloFormulario.length ? 'formulario' : 'planilha',
     ignoradasSelecao: ignoradasSelecao,
+    cabecalhoLegadoAmbiguo: cabecalhoLegadoAmbiguo,
     aviso: peloFormulario.length
       ? 'A planilha está vazia; os envios foram recuperados diretamente do formulário.'
       : (respostas.length
-          ? (ignoradasSelecao ? ignoradasSelecao + ' teste(s) de seleção foram ignorados.' : '')
+          ? (ignoradasSelecao
+              ? ignoradasSelecao + ' teste(s) de seleção foram ignorados.'
+              : (cabecalhoLegadoAmbiguo
+                  ? 'Modelo legado: confira se as respostas representam entregas.'
+                  : ''))
           : (ignoradasSelecao
               ? 'A planilha contém testes antigos, mas nenhuma entrega identificada.'
               : 'A planilha está acessível, mas ainda não recebeu envios.')),
