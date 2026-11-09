@@ -1646,7 +1646,9 @@ export default function DubworksManager() {
       const respostas = await lerRespostasEntregasViaEdge(
         projeto.ID,
         planilhaEntregas,
-        pastaEntregas
+        pastaEntregas,
+        links.formEntregasId || links.formEntregas || "",
+        Boolean(links.exigirSemanaEntrega)
       );
 
       if (respostas.length === 0) {
@@ -5147,8 +5149,8 @@ export default function DubworksManager() {
         personagensEntregas,
         elenco: rascunho.Elenco || [],
         episodios,
-        existingSelectionFormId: extrairGoogleFileId(links.formSelecao || ""),
-        existingDeliveriesFormId: extrairGoogleFileId(links.formEntregas || ""),
+        existingSelectionFormId: links.formSelecaoId || extrairGoogleFileId(links.formSelecao || ""),
+        existingDeliveriesFormId: links.formEntregasId || extrairGoogleFileId(links.formEntregas || ""),
       });
 
       const lerUrl = (valor: any) =>
@@ -5163,6 +5165,18 @@ export default function DubworksManager() {
 
       const novosLinks = {
         ...links,
+        formSelecaoId: String(
+          retorno?.formSelecao?.id ||
+          retorno?.data?.formSelecao?.id ||
+          links.formSelecaoId ||
+          extrairGoogleFileId(links.formSelecao || "")
+        ),
+        formEntregasId: String(
+          retorno?.formEntregas?.id ||
+          retorno?.data?.formEntregas?.id ||
+          links.formEntregasId ||
+          extrairGoogleFileId(links.formEntregas || "")
+        ),
         formSelecao:
           lerUrl(retorno.formSelecao || retorno?.data?.formSelecao) ||
           links.formSelecao ||

@@ -2199,10 +2199,13 @@ export async function carregarAvaliacoesSelecaoBanco(
 export async function lerRespostasEntregasViaEdge(
   projetoId: string,
   planilhaEntregasIdOuUrl: string,
-  pastaEntregasIdOuUrl = ""
+  pastaEntregasIdOuUrl = "",
+  formEntregasIdOuUrl = "",
+  exigirSemanaEntrega = false
 ): Promise<EntregaProducao[]> {
   const spreadsheetId = extrairGoogleFileId(planilhaEntregasIdOuUrl);
   const folderId = extrairGoogleFolderId(pastaEntregasIdOuUrl);
+  const formId = extrairGoogleFileId(formEntregasIdOuUrl);
 
   if (!spreadsheetId && !folderId) {
     throw new Error(
@@ -2215,6 +2218,7 @@ export async function lerRespostasEntregasViaEdge(
     projectId: projetoId,
     spreadsheetId,
     folderId,
+    formId,
   });
 
   if (!data.spreadsheetId) {
@@ -2230,6 +2234,17 @@ export async function lerRespostasEntregasViaEdge(
   }
   if (!Array.isArray(data.respostas)) {
     throw new Error("A integração não retornou uma lista válida de entregas.");
+  }
+
+  // Não importar testes antigos de formulários reaproveitados enquanto a
+  // versão implantada do Apps Script ainda não separar Semana/Corte.
+  if (exigirSemanaEntrega && data.respostas.some(
+    (item: any) => !String(item.semana || "").trim()
+  )) {
+    throw new Error(
+      "Esta planilha mistura testes e entregas. O Apps Script ainda retornou " +
+      "respostas sem Semana/Corte. Atualize a implantação do Web App antes de sincronizar."
+    );
   }
 
   return data.respostas.map((item: any, index: number) => ({
@@ -3306,6 +3321,9 @@ export function extrairLinksDrive(observacoes?: string) {
       entregasProjeto: "",
       formSelecao: "",
       formEntregas: "",
+      formSelecaoId: "",
+      formEntregasId: "",
+      exigirSemanaEntrega: false,
       planilhaSelecao: "",
       planilhaEntregas: "",
     };
@@ -3327,6 +3345,9 @@ export function extrairLinksDrive(observacoes?: string) {
       entregasProjeto: "",
       formSelecao: "",
       formEntregas: "",
+      formSelecaoId: "",
+      formEntregasId: "",
+      exigirSemanaEntrega: false,
       planilhaSelecao: "",
       planilhaEntregas: "",
       ...JSON.parse(json),
@@ -3345,6 +3366,9 @@ export function extrairLinksDrive(observacoes?: string) {
       entregasProjeto: "",
       formSelecao: "",
       formEntregas: "",
+      formSelecaoId: "",
+      formEntregasId: "",
+      exigirSemanaEntrega: false,
       planilhaSelecao: "",
       planilhaEntregas: "",
     };
