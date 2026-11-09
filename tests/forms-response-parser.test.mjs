@@ -145,3 +145,43 @@ test("identifica corte referente à semana em formatos antigos", () => {
   const { result } = executar([aba("Respostas ao formulário 1", headers, [row])]);
   assert.equal(result().respostas[0].semana, "Semana 03");
 });
+
+test("recupera uploads de formulário original mesmo com planilha vazia", () => {
+  const FORM_ID = "1ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijk";
+  const FILE_ID = "1abcdefghijklmnopQRSTUVxyz12345678";
+  const item = (title, type, value) => ({
+    getItem: () => ({ getTitle: () => title, getType: () => type }),
+    getResponse: () => value,
+  });
+  const response = {
+    getTimestamp: () => new Date("2026-11-08T14:49:03Z"),
+    getItemResponses: () => [
+      item("Nome do membro", "TEXT", "Dublador Exemplo"),
+      item("Número de telefone", "TEXT", "000000000"),
+      item("Personagem", "TEXT", "Personagem A"),
+      item("Semana / Corte", "LIST", "Semana 02"),
+      item("Upload do arquivo", "FILE_UPLOAD", [FILE_ID]),
+    ],
+  };
+  const { context, result } = executar(
+    [aba("Form Responses 1", [
+      "Timestamp", "Nome", "Número de telefone", "Personagem",
+      "Semana / Corte", "Link do vídeo",
+    ], [])],
+    { spreadsheetId: SPREADSHEET_ID, formId: FORM_ID }
+  );
+  context.FormApp = {
+    openById(id) {
+      assert.equal(id, FORM_ID);
+      return { getResponses: () => [response] };
+    },
+  };
+  const data = result();
+  assert.equal(data.origem, "formulario");
+  assert.equal(data.respostas.length, 1);
+  assert.equal(data.respostas[0].personagem, "Personagem A");
+  assert.equal(data.respostas[0].semana, "Semana 02");
+  assert.equal(data.respostas[0].videoUrl, `https://drive.google.com/file/d/${FILE_ID}/view`);
+  assert.equal(data.respostas[0].id, "2");
+  assert.match(data.aviso, /recuperados diretamente do formulário/i);
+});
