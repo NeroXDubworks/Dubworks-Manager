@@ -1649,6 +1649,15 @@ export default function DubworksManager() {
         pastaEntregas
       );
 
+      if (respostas.length === 0) {
+        alert(
+          "Não há respostas na planilha de entregas vinculada a este projeto. " +
+          "Nenhum registro foi criado ou atualizado. Se existirem envios no Forms, " +
+          "confira o destino das respostas e o link da planilha cadastrada."
+        );
+        return;
+      }
+
       const { data: episodiosProjeto, error: erroEpisodios } =
         await supabase
           .from("projeto_episodios")
