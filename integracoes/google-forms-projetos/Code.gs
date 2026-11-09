@@ -766,7 +766,13 @@ function lerRespostas_(payload, tipo) {
   const idx = function (aliases) {
     const normalizados = aliases.map(normalizarTexto_);
     return headers.findIndex(function (header) {
-      return normalizados.indexOf(header) !== -1;
+      const limpo = header.replace(/[:：?]+$/g, '').trim();
+      return normalizados.some(function (alias) {
+        return limpo === alias ||
+          limpo.indexOf(alias + ':') === 0 ||
+          limpo.indexOf(alias + ' (') === 0 ||
+          limpo.indexOf(alias + ' /') === 0;
+      });
     });
   };
 
@@ -775,6 +781,9 @@ function lerRespostas_(payload, tipo) {
   const iTelefone = idx([
     'número de telefone / whatsapp',
     'numero de telefone / whatsapp',
+    'número de telefone',
+    'numero de telefone',
+    'telefone do membro',
     'telefone',
     'whatsapp',
     'número / id',
@@ -785,18 +794,22 @@ function lerRespostas_(payload, tipo) {
     'personagem desejado',
     'escolha o personagem',
   ]);
-  const iSemana = idx(['semana', 'semana / corte', 'episódio', 'episodio']);
+  const iSemana = idx([
+    'semana', 'semana / corte', 'semana/corte',
+    'semena/corte', 'semena / corte', 'episódio', 'episodio',
+  ]);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
   // Aceita títulos diferentes dos modelos novos e antigos de Forms.
   // A busca por cabeçalhos é tolerante a prefixos/sufixos como "(Opcional)".
   const termosUpload =
     tipo === 'selecao'
       ? ['upload do teste', 'envie seu teste aqui', 'link do teste', 'faça o upload', 'faca o upload', 'teste', 'arquivo', 'upload']
-      : ['upload do arquivo', 'upload da entrega', 'link do vídeo', 'link do video', 'link da entrega', 'envie sua entrega', 'arquivo', 'upload'];
+      : ['upload do arquivo', 'upload da entrega', 'link do vídeo', 'link do video', 'link da entrega', 'envie sua entrega', 'vídeo/áudio dublado', 'video/audio dublado', 'arquivo', 'upload', 'link:'];
   const iUpload = headers.findIndex(function (header) {
     return termosUpload.some(function (termo) {
-      return header === normalizarTexto_(termo) ||
-        header.indexOf(normalizarTexto_(termo)) !== -1;
+      const alias = normalizarTexto_(termo);
+      return header === alias ||
+        header.indexOf(alias) !== -1;
     });
   });
 
