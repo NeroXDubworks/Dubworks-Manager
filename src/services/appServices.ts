@@ -2217,7 +2217,22 @@ export async function lerRespostasEntregasViaEdge(
     folderId,
   });
 
-  return (data.respostas || []).map((item: any, index: number) => ({
+  if (!data.spreadsheetId) {
+    throw new Error(
+      data.aviso ||
+        "Nenhuma planilha de entregas foi localizada. Confira os vínculos do Forms e do Google Sheets."
+    );
+  }
+  if (spreadsheetId && extrairGoogleFileId(String(data.spreadsheetId)) !== spreadsheetId) {
+    throw new Error(
+      "A integração retornou uma planilha diferente da cadastrada no projeto. Importação cancelada para evitar misturar respostas."
+    );
+  }
+  if (!Array.isArray(data.respostas)) {
+    throw new Error("A integração não retornou uma lista válida de entregas.");
+  }
+
+  return data.respostas.map((item: any, index: number) => ({
     projeto_id: 0,
     resposta_id: String(item.id || item.linha || index + 1),
     linha: Number(item.linha || index + 2),
@@ -2246,7 +2261,7 @@ export async function salvarEntregasProducaoBanco(
   const ids = [...new Set(entregas.map((item) => item.resposta_id))];
   const { data: existentes, error: erroExistentes } = await supabase
     .from("entregas_producao")
-    .select("resposta_id, episodio_id, status")
+    .select("resposta_id, episodio_id, status, video_url, comentario")
     .eq("projeto_id", Number(projetoId))
     .in("resposta_id", ids);
 
@@ -2266,8 +2281,9 @@ export async function salvarEntregasProducaoBanco(
     dublador: item.dublador,
     telefone: item.telefone,
     semana: item.semana,
-    video_url: item.video_url,
-    comentario: item.comentario,
+    // Não apagar links ou comentários antigos se o Forms não devolver o upload.
+    video_url: item.video_url || porId.get(String(item.resposta_id))?.video_url || "",
+    comentario: item.comentario || porId.get(String(item.resposta_id))?.comentario || "",
     status: porId.get(String(item.resposta_id))?.status || item.status || "pendente",
     data_envio: item.data_envio || "",
   }));
