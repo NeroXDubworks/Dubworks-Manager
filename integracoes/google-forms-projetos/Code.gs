@@ -946,7 +946,7 @@ function lerRespostasDiretoDoFormulario_(payload) {
       return campos.find(function (item) { return padrao.test(item.titulo); });
     }
 
-    const nome = campo_(/nome|dublador|membro/);
+    const nome = campo_(/\bnome\b|dublador/);
     const telefone = campo_(/telefone|whatsapp|n[uú]mero/);
     const personagem = campo_(/personagem/);
     const semana = campo_(/semana|semena|epis[oó]dio|corte|parte/);
