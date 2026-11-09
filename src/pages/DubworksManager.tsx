@@ -1647,7 +1647,8 @@ export default function DubworksManager() {
         projeto.ID,
         planilhaEntregas,
         pastaEntregas,
-        links.formEntregasId || links.formEntregas || ""
+        links.formEntregasId || links.formEntregas || "",
+        Boolean(links.exigirSemanaEntrega)
       );
 
       if (respostas.length === 0) {
