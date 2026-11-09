@@ -248,7 +248,8 @@ export default function ProjectEpisodesPanel({
           projeto.ID,
           links.planilhaEntregas || "",
           links.entregasProjeto || links.projeto || "",
-          links.formEntregasId || links.formEntregas || ""
+          links.formEntregasId || links.formEntregas || "",
+          Boolean(links.exigirSemanaEntrega)
         ),
         carregarEntregasProducaoBanco(projeto.ID),
       ]);
