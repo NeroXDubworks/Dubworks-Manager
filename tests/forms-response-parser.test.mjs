@@ -95,3 +95,53 @@ test("múltiplas planilhas no mesmo diretório não são escolhidas aleatoriamen
     /mais de uma planilha/i
   );
 });
+
+test("bloqueia planilha de testes cadastrada incorretamente como entregas", () => {
+  const headers = [
+    "Carimbo de data/hora", "Nome do membro:", "Número de telefone do membro:",
+    "Personagem do teste:", "Vídeo do teste:", "Link teste:",
+  ];
+  const row = [
+    "08/11/2026 10:00", "Pessoa Exemplo", "000000000",
+    "Personagem", "", "https://drive.google.com/file/d/exemplo/view",
+  ];
+  const { result } = executar([aba("Respostas ao formulário 1", headers, [row])]);
+  assert.throws(result, /respostas de teste de seleção/i);
+});
+
+test("em planilha mista mantém somente entregas com semana identificada", () => {
+  const headers = [
+    "Carimbo de data/hora", "Nome do membro:", "Número de telefone do membro:",
+    "Personagem:", "Vídeo do teste:", "Link teste:", "Semana:",
+  ];
+  const testRow = [
+    "09/10/2026 10:00", "Primeiro", "000000001", "Papel", "",
+    "https://drive.google.com/file/d/teste/view", "",
+  ];
+  const deliveryRow = [
+    "09/11/2026 11:00", "Segundo", "000000002", "Papel", "",
+    "https://drive.google.com/file/d/entrega/view", "Semana 01",
+  ];
+  const { result } = executar([
+    aba("Respostas ao formulário 1", headers, [testRow, deliveryRow]),
+  ]);
+  const data = result();
+  assert.equal(data.respostas.length, 1);
+  assert.equal(data.respostas[0].linha, 3);
+  assert.equal(data.respostas[0].semana, "Semana 01");
+  assert.equal(data.ignoradasSelecao, 1);
+  assert.match(data.aviso, /teste\(s\) de seleção foram ignorados/i);
+});
+
+test("identifica corte referente à semana em formatos antigos", () => {
+  const headers = [
+    "Carimbo de data/hora", "Nome do membro:", "Personagem:",
+    "Vídeo dublado:", "Corte referente a semana:",
+  ];
+  const row = [
+    "09/11/2026 10:00", "Pessoa Exemplo", "Papel",
+    "https://drive.google.com/file/d/video/view", "Semana 03",
+  ];
+  const { result } = executar([aba("Respostas ao formulário 1", headers, [row])]);
+  assert.equal(result().respostas[0].semana, "Semana 03");
+});
