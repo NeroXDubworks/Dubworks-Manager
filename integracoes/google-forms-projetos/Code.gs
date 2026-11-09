@@ -708,24 +708,56 @@ function lerRespostas_(payload, tipo) {
   }
 
   if (!spreadsheetId) {
-    return {
-      ok: true,
-      respostas: [],
-      spreadsheetId: '',
-      spreadsheetUrl: '',
-      aviso:
-        'Nenhuma planilha de respostas de ' +
-        (tipo === 'selecao' ? 'Seleção' : 'Entregas') +
-        ' foi localizada ainda.',
-    };
+    throw new Error(
+      'Nenhuma planilha de respostas de ' +
+      (tipo === 'selecao' ? 'Seleção' : 'Entregas') +
+      ' foi localizada. Configure o vínculo da planilha deste projeto antes de sincronizar.'
+    );
   }
 
   const ss = SpreadsheetApp.openById(spreadsheetId);
-  const sheet = ss.getSheets()[0];
+  // Projetos antigos podem ter abas auxiliares vazias antes da aba de respostas.
+  // Identificar o cabeçalho antes de ler evita uma falsa sincronização com zero envios.
+  const abas = ss.getSheets();
+  const temCabecalhoFormulario = function (aba) {
+    if (aba.getLastColumn() < 1) return false;
+    const headers = aba.getRange(1, 1, 1, Math.min(aba.getLastColumn(), 40))
+      .getDisplayValues()[0].map(normalizarTexto_);
+    const temData = headers.some(function (h) {
+      return h.indexOf('timestamp') !== -1 ||
+        h.indexOf('carimbo de data/hora') !== -1;
+    });
+    const temCampos = headers.some(function (h) {
+      return h.indexOf('nome') !== -1 ||
+        h.indexOf('personagem') !== -1 ||
+        h.indexOf('semana') !== -1;
+    });
+    return temData && temCampos;
+  };
+  const sheet = abas.find(temCabecalhoFormulario) ||
+    abas.find(function (aba) {
+      return /respostas|responses/i.test(aba.getName()) &&
+        aba.getLastColumn() > 0;
+    });
+
+  if (!sheet) {
+    throw new Error(
+      'A planilha vinculada não possui uma aba de respostas reconhecida do Forms. ' +
+      'Confira o destino das respostas no formulário.'
+    );
+  }
+
   const valores = sheet.getDataRange().getDisplayValues();
 
   if (!valores.length) {
-    return { ok: true, respostas: [], spreadsheetId: spreadsheetId };
+    return {
+      ok: true,
+      respostas: [],
+      spreadsheetId: spreadsheetId,
+      spreadsheetUrl: ss.getUrl(),
+      sheetName: sheet.getName(),
+      aviso: 'A planilha está acessível, mas ainda não possui envios.',
+    };
   }
 
   const headers = valores[0].map(normalizarTexto_);
@@ -734,7 +766,14 @@ function lerRespostas_(payload, tipo) {
   const idx = function (aliases) {
     const normalizados = aliases.map(normalizarTexto_);
     return headers.findIndex(function (header) {
-      return normalizados.indexOf(header) !== -1;
+      const limpo = header.replace(/[:：?]+$/g, '').trim();
+      return normalizados.some(function (alias) {
+        return limpo === alias ||
+          limpo.indexOf(alias + ':') === 0 ||
+          limpo.indexOf(alias + ' (') === 0 ||
+          limpo.indexOf(alias + ' ') === 0 ||
+          limpo.indexOf(alias + ' /') === 0;
+      });
     });
   };
 
@@ -743,6 +782,9 @@ function lerRespostas_(payload, tipo) {
   const iTelefone = idx([
     'número de telefone / whatsapp',
     'numero de telefone / whatsapp',
+    'número de telefone',
+    'numero de telefone',
+    'telefone do membro',
     'telefone',
     'whatsapp',
     'número / id',
@@ -753,18 +795,22 @@ function lerRespostas_(payload, tipo) {
     'personagem desejado',
     'escolha o personagem',
   ]);
-  const iSemana = idx(['semana', 'semana / corte', 'episódio', 'episodio']);
+  const iSemana = idx([
+    'semana', 'semana / corte', 'semana/corte',
+    'semena/corte', 'semena / corte', 'episódio', 'episodio',
+  ]);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
   // Aceita títulos diferentes dos modelos novos e antigos de Forms.
   // A busca por cabeçalhos é tolerante a prefixos/sufixos como "(Opcional)".
   const termosUpload =
     tipo === 'selecao'
       ? ['upload do teste', 'envie seu teste aqui', 'link do teste', 'faça o upload', 'faca o upload', 'teste', 'arquivo', 'upload']
-      : ['upload do arquivo', 'upload da entrega', 'link do vídeo', 'link do video', 'link da entrega', 'envie sua entrega', 'arquivo', 'upload'];
+      : ['upload do arquivo', 'upload da entrega', 'link do vídeo', 'link do video', 'link da entrega', 'envie sua entrega', 'vídeo/áudio dublado', 'video/audio dublado', 'arquivo', 'upload', 'link:'];
   const iUpload = headers.findIndex(function (header) {
     return termosUpload.some(function (termo) {
-      return header === normalizarTexto_(termo) ||
-        header.indexOf(normalizarTexto_(termo)) !== -1;
+      const alias = normalizarTexto_(termo);
+      return header === alias ||
+        header.indexOf(alias) !== -1;
     });
   });
 
@@ -802,6 +848,8 @@ function lerRespostas_(payload, tipo) {
     respostas: respostas,
     spreadsheetId: spreadsheetId,
     spreadsheetUrl: ss.getUrl(),
+    sheetName: sheet.getName(),
+    aviso: respostas.length ? '' : 'A planilha está acessível, mas ainda não recebeu envios.',
   };
 }
 
@@ -810,14 +858,21 @@ function localizarPlanilhaNaPasta_(folderId, tipo) {
   const arquivos = pasta.getFilesByType(MimeType.GOOGLE_SHEETS);
   const prefixo = tipo === 'selecao' ? '[seleção]' : '[entregas]';
 
+  const candidatas = [];
   while (arquivos.hasNext()) {
     const arquivo = arquivos.next();
     if (normalizarTexto_(arquivo.getName()).indexOf(normalizarTexto_(prefixo)) !== -1) {
-      return arquivo.getId();
+      candidatas.push(arquivo.getId());
     }
   }
 
-  return '';
+  if (candidatas.length > 1) {
+    throw new Error(
+      'Há mais de uma planilha de respostas na pasta. Vincule a planilha correta ' +
+      'ao projeto para evitar importar dados de outro formulário.'
+    );
+  }
+  return candidatas.length === 1 ? candidatas[0] : '';
 }
 
 function finalizarProjeto_(payload) {

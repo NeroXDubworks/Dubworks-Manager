@@ -252,6 +252,15 @@ export default function ProjectEpisodesPanel({
         carregarEntregasProducaoBanco(projeto.ID),
       ]);
 
+      if (respostas.length === 0) {
+        alert(
+          "Nenhum envio foi encontrado na planilha de entregas deste projeto. " +
+          "Nenhuma entrega foi criada ou alterada. Se já recebeu gravações, " +
+          "confira se o formulário está enviando as respostas para a planilha vinculada."
+        );
+        return;
+      }
+
       const porResposta = new Map(
         salvasAnteriormente.map((item) => [String(item.resposta_id), item])
       );
