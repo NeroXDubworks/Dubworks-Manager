@@ -247,7 +247,8 @@ export default function ProjectEpisodesPanel({
         lerRespostasEntregasViaEdge(
           projeto.ID,
           links.planilhaEntregas || "",
-          links.entregasProjeto || links.projeto || ""
+          links.entregasProjeto || links.projeto || "",
+          links.formEntregasId || links.formEntregas || ""
         ),
         carregarEntregasProducaoBanco(projeto.ID),
       ]);
