@@ -2199,10 +2199,12 @@ export async function carregarAvaliacoesSelecaoBanco(
 export async function lerRespostasEntregasViaEdge(
   projetoId: string,
   planilhaEntregasIdOuUrl: string,
-  pastaEntregasIdOuUrl = ""
+  pastaEntregasIdOuUrl = "",
+  formEntregasIdOuUrl = ""
 ): Promise<EntregaProducao[]> {
   const spreadsheetId = extrairGoogleFileId(planilhaEntregasIdOuUrl);
   const folderId = extrairGoogleFolderId(pastaEntregasIdOuUrl);
+  const formId = extrairGoogleFileId(formEntregasIdOuUrl);
 
   if (!spreadsheetId && !folderId) {
     throw new Error(
@@ -2215,6 +2217,7 @@ export async function lerRespostasEntregasViaEdge(
     projectId: projetoId,
     spreadsheetId,
     folderId,
+    formId,
   });
 
   if (!data.spreadsheetId) {
