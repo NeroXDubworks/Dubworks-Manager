@@ -96,7 +96,7 @@ test("múltiplas planilhas no mesmo diretório não são escolhidas aleatoriamen
   );
 });
 
-test("bloqueia planilha de testes cadastrada incorretamente como entregas", () => {
+test("preserva entregas de formulário manual com cabeçalho legado de teste", () => {
   const headers = [
     "Carimbo de data/hora", "Nome do membro:", "Número de telefone do membro:",
     "Personagem do teste:", "Vídeo do teste:", "Link teste:",
@@ -106,7 +106,10 @@ test("bloqueia planilha de testes cadastrada incorretamente como entregas", () =
     "Personagem", "", "https://drive.google.com/file/d/exemplo/view",
   ];
   const { result } = executar([aba("Respostas ao formulário 1", headers, [row])]);
-  assert.throws(result, /respostas de teste de seleção/i);
+  const data = result();
+  assert.equal(data.respostas.length, 1);
+  assert.equal(data.cabecalhoLegadoAmbiguo, true);
+  assert.match(data.aviso, /Modelo legado/i);
 });
 
 test("em planilha mista mantém somente entregas com semana identificada", () => {
