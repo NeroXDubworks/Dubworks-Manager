@@ -251,7 +251,39 @@ export async function registrarContratoAssinado(params: {
     .update({
       arquivo_url: params.arquivoUrl.trim(), status: "assinado",
       assinaturas_confirmadas_em: params.dataAssinaturaISO,
-    }).eq("id", params.contratoId).neq("status", "assinado").select("id").single();
+    }).eq("id", params.contratoId).eq("status", "aguardando_assinatura").select("id").single();
+  if (error) throw error;
+  return data;
+}
+
+export async function anexarDocumentoContratoCrm(id: number, url: string) {
+  if (!/^https:\/\//i.test(url.trim())) throw new Error("Informe o link HTTPS do PDF revisado.");
+  const { data, error } = await supabase.from("crm_contratos")
+    .update({ arquivo_url: url.trim() })
+    .eq("id", id).in("status", ["rascunho","em_revisao"])
+    .select("id").single();
+  if (error) throw error;
+  return data;
+}
+
+export async function alterarStatusContratoCrm(id: number, atual: string, proximo: string) {
+  const { data, error } = await supabase.from("crm_contratos")
+    .update({ status: proximo })
+    .eq("id", id).eq("status", atual)
+    .select("id,status").single();
+  if (error) throw error;
+  return data;
+}
+
+export async function alterarStatusPropostaCrm(id: number, atual: string, proximo: string, usuario: string) {
+  const patch: Record<string, string> = { status: proximo };
+  if (proximo === "aprovada") {
+    patch.aprovado_por = usuario;
+    patch.aprovado_em = new Date().toISOString();
+  }
+  const { data, error } = await supabase.from("crm_propostas").update(patch)
+    .eq("id", id).eq("status", atual)
+    .select("id,status").single();
   if (error) throw error;
   return data;
 }
