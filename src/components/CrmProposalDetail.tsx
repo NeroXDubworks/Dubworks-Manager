@@ -56,14 +56,15 @@ export default function CrmProposalDetail({ proposta, cliente, negociacao, onClo
   }, [proposta.id]);
 
   const dados = { proposta, cliente, negociacao, itens };
-  const pronto = !carregando && !falha && itens.length > 0;
+  const pronto = !carregando && itens.length > 0;
 
   function visualizarPdf() {
     if (!pronto) return;
     try {
       setFalha("");
       const url = URL.createObjectURL(gerarPdfProposta(dados));
-      const aba = window.open(url, "_blank", "noopener,noreferrer");
+      const aba = window.open(url, "_blank");
+      if (aba) aba.opener = null;
       if (!aba) {
         URL.revokeObjectURL(url);
         setFalha("O navegador bloqueou a abertura. Permita pop-ups ou use Baixar PDF.");
