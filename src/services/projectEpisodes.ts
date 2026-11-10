@@ -15,6 +15,8 @@ export type ProjetoEpisodio = {
   titulo: string;
   descricao?: string | null;
   status: EpisodioStatus;
+  /** Já utilizado nas subdivisões legadas da Giovanna; preservado na listagem. */
+  parent_id?: number | null;
   prazo_em?: string | null;
   data_inicio?: string | null;
   data_conclusao?: string | null;
