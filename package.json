@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:crm": "node tests/crm-pricing.test.mjs && node tests/crm-proposal-pdf.test.mjs",
+    "test:crm": "node tests/crm-pricing.test.mjs && node tests/crm-proposal-pdf.test.mjs && node tests/crm-contract-pdf.test.mjs",
     "test:members": "node tests/members-script.test.mjs && node tests/members-api.test.mjs && node tests/members-ui.test.mjs && node tests/login-hook-order.test.mjs && node tests/member-filters.test.mjs && node tests/member-filter-panel.test.mjs && node tests/daily-report.test.mjs && node tests/daily-report-api.test.mjs && node tests/daily-report-script.test.mjs && node tests/daily-report-ui.test.mjs && node tests/whatsapp-api.test.mjs && node tests/whatsapp-worker.test.mjs && node tests/whatsapp-ui.test.mjs && node tests/whatsapp-connection.test.mjs && node tests/whatsapp-browser.test.mjs && node tests/dev-watch.test.mjs && node tests/member-points-script.test.mjs && node tests/member-points-api.test.mjs && node tests/member-points-ui.test.mjs",
     "bot:install": "node integracoes/whatsapp-bot/install.cjs",
     "bot:start": "node integracoes/whatsapp-bot/install-browser.cjs && node integracoes/whatsapp-bot/server.cjs",
