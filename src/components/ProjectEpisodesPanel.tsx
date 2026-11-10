@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { ElencoItem, Projeto } from "../types";
+import type { ElencoItem, Projeto, ProjetoSemana } from "../types";
 import EpisodeWeeksPanel from "./EpisodeWeeksPanel";
 import {
   enfileirarLembreteWhatsapp,
@@ -42,6 +42,8 @@ type Props = {
   projeto: Projeto;
   usuarioNome?: string;
   podeEditar?: boolean;
+  semanasLegadas?: ProjetoSemana[];
+  onAbrirAcervo?: () => void;
 };
 
 const card: React.CSSProperties = {
@@ -128,6 +130,8 @@ export default function ProjectEpisodesPanel({
   projeto,
   usuarioNome = "Sistema",
   podeEditar = false,
+  semanasLegadas = [],
+  onAbrirAcervo,
 }: Props) {
   const [episodios, setEpisodios] = useState<ProjetoEpisodio[]>([]);
   const [episodioId, setEpisodioId] = useState<number | null>(null);
@@ -1067,6 +1071,8 @@ export default function ProjectEpisodesPanel({
                 podeEditar={podeEditar}
                 usuarioNome={usuarioNome}
                 subdivisoesExistentes={episodios.filter(item => item.parent_id === episodio.id)}
+                semanasLegadas={episodiosPrincipais.length === 1 ? semanasLegadas : []}
+                onAbrirAcervo={onAbrirAcervo}
               />
 
               <div
