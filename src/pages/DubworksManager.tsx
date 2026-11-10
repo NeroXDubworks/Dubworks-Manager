@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import "../mobile-first.css";
 import CortesPage from "./CortesPage";
 import ProjectEpisodesPanel from "../components/ProjectEpisodesPanel";
+import CommercialCrmPanel from "../components/CommercialCrmPanel";
 
 import type {
   AvaliacaoSelecao,
@@ -241,6 +242,7 @@ export default function DubworksManager() {
   const [mostrarAdvertencias, setMostrarAdvertencias] = useState(false);
   const [mostrarEventos, setMostrarEventos] = useState(false);
   const [mostrarMarketing, setMostrarMarketing] = useState(false);
+  const [mostrarCRM, setMostrarCRM] = useState(false);
   const [advertencias, setAdvertencias] = useState<AdvertenciaPlanilha[]>([]);
   const [carregandoAdvertencias, setCarregandoAdvertencias] = useState(false);
   const [erroAdvertencias, setErroAdvertencias] = useState("");
@@ -6895,6 +6897,8 @@ export default function DubworksManager() {
     ? "usuarios"
     : mostrarRelatorios
     ? "relatorios"
+    : mostrarCRM && (usuarioLogado?.cargo === "diretoria" || usuarioLogado?.cargo === "adm")
+    ? "crm"
     : usuarioLogado?.cargo === "marketing"
     ? "marketing"
     : usuarioLogado?.cargo === "analista_rr"
@@ -7091,7 +7095,7 @@ export default function DubworksManager() {
     const ativo = telaAtual === id;
     return (
       <button
-        onClick={onClick}
+        onClick={() => { if (id !== "crm") setMostrarCRM(false); onClick(); }}
         style={{
           width: "100%",
           display: "flex",
@@ -15749,6 +15753,7 @@ export default function DubworksManager() {
                     type="button"
                     className={telaAtual === "projetos" ? "active" : ""}
                     onClick={() => {
+                      setMostrarCRM(false);
                       setMostrarEventos(false);
                       setMostrarMarketing(false);
                       setMostrarMembros(false);
@@ -15764,6 +15769,18 @@ export default function DubworksManager() {
                     ▣ Projetos
                   </button>
                 )}
+
+              {(usuarioLogado.cargo === "diretoria" || usuarioLogado.cargo === "adm") && (
+                <button type="button" className={telaAtual === "crm" ? "active" : ""}
+                  onClick={() => {
+                    setMostrarCRM(true);
+                    setMostrarEventos(false); setMostrarMarketing(false);
+                    setMostrarMembros(false); setMostrarAdvertencias(false);
+                    setMostrarUsuarios(false); setMostrarRelatorios(false);
+                    setMostrarTreinamentos(false); setMostrarFerramentas(false);
+                    setMenuMobileAberto(false);
+                  }}>✦ CRM Comercial</button>
+              )}
 
               {temAcesso(usuarioLogado, "acesso_membros") && (
                 <button
@@ -16019,6 +16036,7 @@ export default function DubworksManager() {
                 label={isMobile ? "" : "Projetos"}
                 icon="▣"
                 onClick={() => {
+                  setMostrarCRM(false);
                   setMostrarEventos(false);
                   setMostrarMarketing(false);
                   setMostrarMembros(false);
@@ -16032,6 +16050,17 @@ export default function DubworksManager() {
                 }}
               />
             )}
+          {(usuarioLogado.cargo === "diretoria" || usuarioLogado.cargo === "adm") && (
+            <SidebarItem id="crm" label={isMobile ? "" : "CRM Comercial"} icon="✦"
+              onClick={() => {
+                setMostrarCRM(true);
+                setMostrarEventos(false); setMostrarMarketing(false);
+                setMostrarMembros(false); setMostrarAdvertencias(false);
+                setMostrarUsuarios(false); setMostrarRelatorios(false);
+                setMostrarTreinamentos(false); setMostrarFerramentas(false);
+                setMenuMobileAberto(false);
+              }} />
+          )}
           {temAcesso(usuarioLogado, "acesso_membros") && (
             <SidebarItem
               id="membros"
@@ -16206,6 +16235,8 @@ export default function DubworksManager() {
           ? UsersPage()
           : telaAtual === "relatorios"
           ? ReportsPage()
+          : telaAtual === "crm" && usuarioLogado
+          ? <CommercialCrmPanel responsavel={usuarioLogado.nome || usuarioLogado.login || "Diretoria"} podeAprovar={usuarioLogado.cargo === "diretoria"} />
           : ProjectsPage()}
       </main>
 
