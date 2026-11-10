@@ -43,8 +43,19 @@ export type CrmProposta = {
   valor_negociado: number;
   custo_interno_estimado: number | null;
   justificativa_valor: string | null;
+  condicoes_pagamento: string | null;
+  validade_em: string | null;
   status: string;
   criado_em: string;
+};
+export type CrmPropostaItem = {
+  id: number;
+  proposta_id: number;
+  servico_id: number | null;
+  descricao: string;
+  unidade: string;
+  quantidade: number;
+  preco_unitario: number;
 };
 export type ParceriaGratuita = {
   id: number;
@@ -123,6 +134,31 @@ export async function listarPropostasCrm(negociacaoId: number): Promise<CrmPropo
     .eq("negociacao_id", negociacaoId).order("versao", { ascending: false });
   if (error) throw error;
   return (data || []) as CrmProposta[];
+}
+
+export async function listarItensPropostaCrm(propostaId: number): Promise<CrmPropostaItem[]> {
+  const { data, error } = await supabase.from("crm_proposta_itens").select("*")
+    .eq("proposta_id", propostaId).order("id", { ascending: true });
+  if (error) throw error;
+  return (data || []) as CrmPropostaItem[];
+}
+
+export async function atualizarCondicoesPropostaCrm(
+  propostaId: number, statusAtual: string, condicoesPagamento: string, validadeEm: string
+) {
+  if (!["rascunho", "em_revisao"].includes(statusAtual)) {
+    throw new Error("As condições de uma proposta já aprovada não podem ser alteradas.");
+  }
+  const { data, error } = await supabase.from("crm_propostas")
+    .update({
+      condicoes_pagamento: condicoesPagamento.trim() || null,
+      validade_em: validadeEm || null,
+    })
+    .eq("id", propostaId).eq("status", statusAtual)
+    .select("id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("A proposta mudou de status. Recarregue antes de salvar.");
+  return data;
 }
 
 export async function criarPropostaCrm(params: {
