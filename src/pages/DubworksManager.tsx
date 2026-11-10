@@ -300,6 +300,7 @@ export default function DubworksManager() {
   const [abaProjeto, setAbaProjeto] = useState<
     | "informacoes"
     | "producao"
+    | "legado"
     | "selecao"
     | "registros"
     | "drive"
@@ -7765,6 +7766,72 @@ export default function DubworksManager() {
   };
 
   const DrivePanel = () => (
+    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ ...painelDarkStyle, display: "grid", gap: 16 }}>
+      <div>
+        <h2 style={{ ...tituloCardDarkStyle, margin: 0 }}>📁 Arquivos do Drive</h2>
+        <p style={{ color: "#94a3b8", margin: "7px 0 0" }}>
+          Pastas e formulários reunidos em uma aba própria, no modelo da Giovanna.
+        </p>
+      </div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : isTablet ? "repeat(2,minmax(0,1fr))" : "repeat(3,minmax(0,1fr))",
+        gap: 12,
+      }}>
+        {([
+          { key: "principal", title: "Pasta principal", icon: "📁",
+            descricao: "Estrutura geral do projeto.",
+            links: [["Abrir pasta principal", driveSalvo.pasta || ""]] },
+          { key: "selecao", title: "Seleção", icon: "🎙️",
+            descricao: "Formulário, testes enviados e respostas.",
+            links: [
+              ["Formulário de seleção", driveSalvo.formSelecao || ""],
+              ["Pasta de testes", driveSalvo.respostasSelecao || driveSalvo.falasTeste || ""],
+              ["Planilha de seleção", driveSalvo.planilhaSelecao || ""],
+            ] },
+          { key: "producao", title: "Projeto e entregas", icon: "🎬",
+            descricao: "Arquivos, formulário e planilha de entregas.",
+            links: [
+              ["Pasta de produção", driveSalvo.projeto || ""],
+              ["Formulário de entregas", driveSalvo.formEntregas || ""],
+              ["Pasta de entregas", driveSalvo.entregasProjeto || ""],
+              ["Planilha de entregas", driveSalvo.planilhaEntregas || ""],
+            ] },
+          { key: "finalizados", title: "Finalizados", icon: "✅",
+            descricao: "Arquivos concluídos e organização já existente.",
+            links: [["Pasta de finalizados", driveSalvo.finalizados || ""]] },
+        ] as Array<{key: string; title: string; icon: string; descricao: string; links: Array<[string,string]>}>).map((grupo) => (
+          <section key={grupo.key} style={{
+            display: "grid", alignContent: "start", gap: 10, padding: 14, borderRadius: 14,
+            border: "1px solid rgba(148,163,184,.18)",
+            background: "linear-gradient(145deg,rgba(15,23,42,.86),rgba(2,6,23,.62))",
+          }}>
+            <div style={{ color: "#f8fafc", fontWeight: 800 }}>{grupo.icon} {grupo.title}</div>
+            <div style={{ color: "#94a3b8", fontSize: 12 }}>{grupo.descricao}</div>
+            {grupo.links.map(([rotulo, link]) => (
+              <button key={rotulo} type="button" disabled={!link} onClick={() => link && abrirLink(link)}
+                style={{
+                  ...botaoSecundarioStyle, display: "flex", gap: 12, alignItems: "center",
+                  justifyContent: "space-between", width: "100%", textAlign: "left",
+                  opacity: link ? 1 : 0.54, cursor: link ? "pointer" : "not-allowed",
+                }}>
+                <span>{rotulo}</span>
+                <span style={{ fontSize: 11, color: link ? "#7dd3fc" : "#94a3b8" }}>
+                  {link ? "Abrir ↗" : "Indisponível"}
+                </span>
+              </button>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+      {projetoPainel && podeEditarProjeto(usuarioLogado, projetoPainel) && (
+        <details style={{ ...painelDarkStyle, minWidth: 0 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 800, color: "#cbd5e1" }}>
+            ⚙️ Gestão da integração — criar pastas, atualizar Forms e editar links
+          </summary>
+          <div style={{ marginTop: 14 }}>
     <div style={painelDarkStyle}>
       <div
         style={{
@@ -7955,6 +8022,10 @@ export default function DubworksManager() {
           </div>
         ))}
       </div>
+    </div>
+          </div>
+        </details>
+      )}
     </div>
   );
 
@@ -13899,7 +13970,9 @@ export default function DubworksManager() {
         >
           {[
             ["informacoes", "ⓘ Informações"],
+            ["drive", "📁 Arquivos do Drive"],
             ["producao", "🎬 Produção"],
+            ["legado", "🗂 Acervo anterior"],
             ["selecao", "🎭 Seleção"],
             ["registros", "▣ Registro"],
             ["atividades", "↔ Atividade"],
@@ -13934,7 +14007,7 @@ export default function DubworksManager() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "1fr 0.95fr",
+            gridTemplateColumns: "1fr",
             gap: 18,
           }}
         >
@@ -13961,7 +14034,6 @@ export default function DubworksManager() {
               </div>
             </div>
           </div>
-          {DrivePanel()}
         </div>
       )}
 
@@ -13989,15 +14061,17 @@ export default function DubworksManager() {
             <button
               type="button"
               style={botaoSecundarioStyle}
-              onClick={() => document.getElementById("dw-producao-banco")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              onClick={() => setAbaProjeto("legado")}
             >
-              🎙️ Ir para Banco & Semanas ↓
+              🗂 Conferir acervo de semanas anteriores
             </button>
           </div>
           <ProjectEpisodesPanel
             projeto={projetoPainel}
             usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
             podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
+            semanasLegadas={semanasProjeto}
+            onAbrirAcervo={() => setAbaProjeto("legado")}
           />
         </section>
       )}
@@ -14006,7 +14080,7 @@ export default function DubworksManager() {
         projetoPainel &&
         renderAbaSelecaoVisual(projetoPainel)}
 
-      {abaProjeto === "producao" && projetoPainel && (
+      {abaProjeto === "legado" && projetoPainel && (
         <div
           id="dw-producao-banco"
           style={{ display: "grid", gap: 18, scrollMarginTop: 22 }}
@@ -14022,17 +14096,17 @@ export default function DubworksManager() {
             }}
           >
             <div>
-              <h2 style={{ ...tituloCardDarkStyle, marginBottom: 4 }}>🎙️ Banco & Semanas</h2>
+              <h2 style={{ ...tituloCardDarkStyle, marginBottom: 4 }}>🗂 Acervo anterior — Banco e Semanas</h2>
               <p style={{ color: "#94a3b8", fontSize: 13, margin: 0 }}>
-                Gestão do elenco, participantes por semana e avaliação das gravações.
+                Registros antigos preservados para consultar, avaliar e concluir entregas existentes. Novas semanas são cadastradas em Produção → Episódio.
               </p>
             </div>
             <button
               type="button"
               style={botaoSecundarioStyle}
-              onClick={() => document.getElementById("dw-producao-episodios")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              onClick={() => setAbaProjeto("producao")}
             >
-              ↑ Voltar aos episódios
+              ↑ Ir para Produção atual
             </button>
           </div>
           <div
@@ -14572,15 +14646,10 @@ export default function DubworksManager() {
                 {podeEditarProjeto(usuarioLogado, projetoPainel) && (
                   <button
                     type="button"
-                    onClick={() => criarNovaSemanaProjeto(projetoPainel)}
-                    disabled={criandoSemanaProjeto}
+                    onClick={() => setAbaProjeto("producao")}
                     style={botaoPrimarioStyle}
                   >
-                    {criandoSemanaProjeto
-                      ? "Criando..."
-                      : semanasProjeto.length
-                      ? "+ Criar próxima semana"
-                      : "+ Criar Semana 01"}
+                    + Nova semana por episódio
                   </button>
                 )}
 
