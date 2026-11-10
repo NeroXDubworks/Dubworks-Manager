@@ -18,6 +18,8 @@ type Props = {
   episodioId: number;
   podeEditar: boolean;
   usuarioNome: string;
+  /** Registros da hierarquia anterior criada pela Giovanna, sem migração automática. */
+  subdivisoesExistentes?: Array<{ id: number; numero: number; titulo: string; status: string }>;
 };
 
 const painel: React.CSSProperties = {
@@ -42,7 +44,7 @@ const estados: Record<CorteStatus, string> = {
 const statusOpcoes: CorteStatus[] = ["nao_iniciada", "em_andamento", "pausada", "concluida"];
 const inicial = { duracao: "05:00", observacao: "", prazoEm: "", videoBaseUrl: "", trilhaUrl: "" };
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome }: Props) {
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [] }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
@@ -98,7 +100,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
 
   async function criar(event: React.FormEvent) {
     event.preventDefault();
-    if (!podeEditar || salvando) return;
+    if (!podeEditar || salvando || subdivisoesExistentes.length) return;
     const segundos = parseCutDuration(novo.duracao);
     if (segundos === null) {
       setErro("Duração inválida. Use MM:SS (ex.: 04:48) ou HH:MM:SS.");
@@ -183,11 +185,18 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
             setCarregando(true); setErro("");
             void recarregar().catch((e: any) => setErro(e?.message || "Falha ao atualizar.")).finally(() => setCarregando(false));
           }}>↻ Atualizar</button>
-          {podeEditar && <button type="button" style={botao} disabled={carregando || salvando} onClick={() => setMostrarNovo(true)}>+ Cadastrar semana</button>}
+          {podeEditar && <button type="button" style={botao} disabled={carregando || salvando || subdivisoesExistentes.length > 0} onClick={() => setMostrarNovo(true)}>+ Cadastrar semana</button>}
         </div>
       </div>
 
       {erro && <p role="alert" style={{ color: "#fda4af", margin: 0 }}>{erro}</p>}
+      {subdivisoesExistentes.length > 0 && (
+        <div style={{ padding: 11, border: "1px solid rgba(245,158,11,.35)", borderRadius: 10 }}>
+          <strong style={{ color: "#fde68a" }}>Subdivisões já cadastradas ({subdivisoesExistentes.length})</strong>
+          <p style={texto}>Estas subdivisões feitas anteriormente permanecem no banco. A criação de novas semanas está bloqueada neste episódio até conferirmos a correspondência, para não duplicar ou apagar o trabalho existente.</p>
+          {subdivisoesExistentes.map(item => <div key={item.id} style={{ color: "#cbd5e1", fontSize: 13 }}>{item.titulo || `Item ${item.numero}`} · {item.status}</div>)}
+        </div>
+      )}
       {carregando && <p style={texto}>Carregando semanas e entregas...</p>}
       {!carregando && cortes.length === 0 && (
         <p style={texto}>Nenhuma semana/corte cadastrada neste episódio. As semanas legadas continuam preservadas.</p>
