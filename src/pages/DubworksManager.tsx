@@ -16236,7 +16236,7 @@ export default function DubworksManager() {
           : telaAtual === "relatorios"
           ? ReportsPage()
           : telaAtual === "crm" && usuarioLogado
-          ? <CommercialCrmPanel responsavel={usuarioLogado.nome || usuarioLogado.login || "Diretoria"} />
+          ? <CommercialCrmPanel responsavel={usuarioLogado.nome || usuarioLogado.login || "Diretoria"} podeAprovar={usuarioLogado.cargo === "diretoria"} />
           : ProjectsPage()}
       </main>
 
