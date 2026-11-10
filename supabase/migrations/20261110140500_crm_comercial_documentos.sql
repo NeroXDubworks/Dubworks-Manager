@@ -170,7 +170,7 @@ begin
     execute format('create policy crm_acesso_select on public.%I for select to authenticated using ((select app_private.can_manage_crm()))', tabela);
     execute format('create policy crm_acesso_insert on public.%I for insert to authenticated with check ((select app_private.can_manage_crm()))', tabela);
     execute format('create policy crm_acesso_update on public.%I for update to authenticated using ((select app_private.can_manage_crm())) with check ((select app_private.can_manage_crm()))', tabela);
-    execute format('grant usage,select on sequence public.%I_id_seq to authenticated', tabela);
+    execute format('grant usage, select on sequence public.%I to authenticated', tabela || '_id_seq');
   end loop;
 end $ddl$;
 
