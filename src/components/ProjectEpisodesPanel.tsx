@@ -192,12 +192,13 @@ export default function ProjectEpisodesPanel({
       setErro("");
       const lista = await carregarEpisodiosProjeto(projeto.ID);
       setEpisodios(lista);
+      const principais = lista.filter(item => !item.parent_id);
 
       const preferido =
-        (preferirId && lista.find((item) => item.id === preferirId)) ||
-        (episodioId && lista.find((item) => item.id === episodioId)) ||
-        lista.find((item) => item.status === "em_producao") ||
-        lista[0] ||
+        (preferirId && principais.find((item) => item.id === preferirId)) ||
+        (episodioId && principais.find((item) => item.id === episodioId)) ||
+        principais.find((item) => item.status === "em_producao") ||
+        principais[0] ||
         null;
 
       setEpisodioId(preferido?.id || null);
@@ -1065,6 +1066,7 @@ export default function ProjectEpisodesPanel({
                 episodioId={episodio.id}
                 podeEditar={podeEditar}
                 usuarioNome={usuarioNome}
+                subdivisoesExistentes={episodios.filter(item => item.parent_id === episodio.id)}
               />
 
               <div
