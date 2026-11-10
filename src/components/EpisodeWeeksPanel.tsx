@@ -21,6 +21,8 @@ type Props = {
   usuarioNome: string;
   /** Registros da hierarquia anterior criada pela Giovanna, sem migração automática. */
   subdivisoesExistentes?: Array<{ id: number; numero: number; titulo: string; status: string }>;
+  semanasLegadas?: Array<{ semana: number; status?: string }>;
+  onAbrirAcervo?: () => void;
 };
 
 const painel: React.CSSProperties = {
@@ -45,7 +47,7 @@ const estados: Record<CorteStatus, string> = {
 const statusOpcoes: CorteStatus[] = ["nao_iniciada", "em_andamento", "pausada", "concluida"];
 const inicial = { duracao: "05:00", observacao: "", prazoEm: "", videoBaseUrl: "", trilhaUrl: "" };
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [] }: Props) {
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
@@ -89,6 +91,9 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     return () => { ativo = false; };
   }, [projetoId, episodioId]);
 
+  const proximaSemana = Math.max(
+    0, ...cortes.map(c => c.semana), ...semanasLegadas.map(s => s.semana)
+  ) + 1;
   const selecionado = cortes.find(c => c.id === selecionadoId) || null;
   const entregasVinculadas = useMemo(
     () => entregas.filter(e => selecionado && e.episodio_corte_id === selecionado.id),
@@ -107,7 +112,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       setErro("Duração inválida. Use MM:SS (ex.: 04:48) ou HH:MM:SS.");
       return;
     }
-    const numero = cortes.reduce((max, c) => Math.max(max, c.semana), 0) + 1;
+    const numero = proximaSemana;
     setSalvando(true);
     setErro("");
     try {
@@ -199,8 +204,29 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
         </div>
       )}
       {carregando && <p style={texto}>Carregando semanas e entregas...</p>}
-      {!carregando && cortes.length === 0 && (
-        <p style={texto}>Nenhuma semana/corte cadastrada neste episódio. As semanas legadas continuam preservadas.</p>
+      {semanasLegadas.length > 0 && (
+        <div style={{ padding: 12, borderRadius: 10, background: "rgba(14,165,233,.08)",
+          border: "1px solid rgba(56,189,248,.25)" }}>
+          <strong style={{ color: "#bae6fd" }}>Semanas anteriores deste projeto</strong>
+          <p style={{ ...texto, margin: "6px 0" }}>
+            As gravações, avaliações e participantes continuam preservados. Como não tinham vínculo direto
+            com episódio, não serão migrados automaticamente nem recadastrados.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+            {semanasLegadas.map(s => (
+              <span key={s.semana} style={{ color: "#e2e8f0", fontSize: 13,
+                padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(148,163,184,.2)" }}>
+                {cutLabel(s.semana)} · {s.status === "concluida" ? "Concluída (anterior)" : "Aberta (anterior)"}
+              </span>
+            ))}
+            {onAbrirAcervo && <button type="button" style={botao} onClick={onAbrirAcervo}>
+              Ver gravações e participantes anteriores
+            </button>}
+          </div>
+        </div>
+      )}
+      {!carregando && cortes.length === 0 && semanasLegadas.length === 0 && (
+        <p style={texto}>Nenhuma semana/corte cadastrada neste episódio.</p>
       )}
 
       {cortes.length > 0 && (
@@ -279,7 +305,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
           onMouseDown={e => { if (e.target === e.currentTarget && !salvando) setMostrarNovo(false); }}>
           <form role="dialog" aria-modal="true" aria-label="Cadastrar semana" onSubmit={e => void criar(e)}
             style={{ ...painel, position: "relative", zIndex: 1, width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 12, boxShadow: "0 30px 100px rgba(0,0,0,.85)", background: "#11162c" }}>
-            <h3 style={{ color: "#f8fafc", margin: 0 }}>Cadastrar {cutLabel(cortes.reduce((max, c) => Math.max(max, c.semana), 0) + 1)}</h3>
+            <h3 style={{ color: "#f8fafc", margin: 0 }}>Cadastrar {cutLabel(proximaSemana)}</h3>
             <p style={{ ...texto, margin: 0 }}>Uma semana = um único corte. Informe sua duração real, mesmo que não tenha exatamente cinco minutos.</p>
             <label style={texto}>Duração (MM:SS) *
               <input style={campo} autoFocus required value={novo.duracao} placeholder="04:48" onChange={e => setNovo(s => ({ ...s, duracao: e.target.value }))} />
