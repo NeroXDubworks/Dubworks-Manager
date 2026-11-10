@@ -44,6 +44,7 @@ function ContractWorkflowCard({ contrato, diretor, recarregar }: {
     aprovado: "enviado", enviado: "aguardando_assinatura",
   };
   const proxima = etapas[contrato.status];
+  const documentoAnexado = /^https:\/\//i.test(String(contrato.arquivo_url || ""));
   async function executarLocal(acao: () => Promise<any>) {
     setOcupado(true); setErroLocal("");
     try { await acao(); await recarregar(); }
@@ -55,11 +56,19 @@ function ContractWorkflowCard({ contrato, diretor, recarregar }: {
     {contrato.arquivo_url && <a href={contrato.arquivo_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir documento ↗</a>}
     {(contrato.status === "rascunho" || contrato.status === "em_revisao") && (
       <form onSubmit={e => { e.preventDefault(); void executarLocal(() => anexarDocumentoContratoCrm(contrato.id, url)); }} style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <input style={{ ...campo, flex: 1 }} type="url" required value={url} onChange={e => setUrl(e.target.value)} placeholder="Link HTTPS do PDF para revisão" />
+        <input style={{ ...campo, flex: 1 }} type="text" required value={url} onChange={e => setUrl(e.target.value)}
+          placeholder="https://drive.google.com/..." aria-label="Link HTTPS do PDF revisado" />
         <button type="submit" style={botao} disabled={ocupado}>Anexar documento</button>
       </form>
     )}
-    {proxima && (proxima !== "aprovado" || diretor) && <button type="button" style={{ ...botao, justifySelf: "start" }} disabled={ocupado} onClick={() => void executarLocal(() => alterarStatusContratoCrm(contrato.id, contrato.status, proxima))}>
+    {proxima === "aprovado" && !documentoAnexado && (
+      <p role="status" style={{ ...small, color: "#fde68a", margin: 0 }}>
+        Para aprovar, anexe primeiro o link completo do documento revisado, começando por https://. Um endereço como www.site.com.br não é suficiente.
+      </p>
+    )}
+    {proxima && (proxima !== "aprovado" || diretor) && <button type="button"
+      style={{ ...botao, justifySelf: "start" }} disabled={ocupado || (proxima === "aprovado" && !documentoAnexado)}
+      onClick={() => void executarLocal(() => alterarStatusContratoCrm(contrato.id, contrato.status, proxima))}>
       {proxima === "em_revisao" ? "Enviar à revisão" : proxima === "aprovado" ? "Aprovar como diretoria" : proxima === "enviado" ? "Marcar como enviado" : "Aguardar assinatura"}
     </button>}
     {contrato.status === "aguardando_assinatura" && (
@@ -69,7 +78,7 @@ function ContractWorkflowCard({ contrato, diretor, recarregar }: {
         void executarLocal(() => registrarContratoAssinado({ contratoId: contrato.id, arquivoUrl: url, dataAssinaturaISO: dataAssinatura }));
       }} style={{ display: "grid", gap: 8 }}>
         <label style={small}>Link do documento efetivamente assinado
-          <input style={campo} required type="url" value={url} onChange={e => setUrl(e.target.value)} />
+          <input style={campo} required type="text" placeholder="https://drive.google.com/..." value={url} onChange={e => setUrl(e.target.value)} />
         </label>
         <label style={small}>Data de assinatura
           <input style={campo} type="date" required value={dataAssinatura} onChange={e => setDataAssinatura(e.target.value)} />
