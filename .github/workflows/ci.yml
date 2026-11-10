@@ -25,5 +25,8 @@ jobs:
       - name: Testar leitura de respostas de Google Forms
         run: node --test tests/forms-response-parser.test.mjs
 
+      - name: Testar regras comerciais e geração de PDF
+        run: npm run test:crm
+
       - name: Build
         run: npm run build

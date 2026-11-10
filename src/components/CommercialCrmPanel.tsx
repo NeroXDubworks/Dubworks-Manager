@@ -10,6 +10,7 @@ import {
   type CrmServico, type ParceriaGratuita,
 } from "../services/commercialCrm";
 import { calculateProposal } from "../shared/crmPricing.js";
+import CrmProposalDetail from "./CrmProposalDetail";
 
 type Tab = "comercial" | "parcerias" | "servicos";
 type ItemEdicao = { descricao: string; servico_id: number | null; unidade: string; quantidade: number; preco_unitario: number };
@@ -98,6 +99,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
   const [negociacoes, setNegociacoes] = useState<CrmNegociacao[]>([]);
   const [negociacaoId, setNegociacaoId] = useState<number | null>(null);
   const [propostas, setPropostas] = useState<CrmProposta[]>([]);
+  const [propostaAbertaId, setPropostaAbertaId] = useState<number | null>(null);
   const [contratos, setContratos] = useState<any[]>([]);
   const [parcerias, setParcerias] = useState<ParceriaGratuita[]>([]);
   const [parceriaId, setParceriaId] = useState<number | null>(null);
@@ -161,6 +163,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
 
   const cliente = clientes.find(c => c.id === clienteId) || null;
   const negociacao = negociacoes.find(n => n.id === negociacaoId) || null;
+  const propostaAberta = propostas.find(p => p.id === propostaAbertaId) || null;
   const parceria = parcerias.find(p => p.id === parceriaId) || null;
   const filtrados = clientes.filter(c => c.nome.toLocaleLowerCase("pt-BR").includes(busca.toLocaleLowerCase("pt-BR")));
   const valores = useMemo(() => {
@@ -244,7 +247,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
             )}
             {filtrados.map(c => (
               <button key={c.id} style={{ ...botao, textAlign: "left", borderColor: c.id === clienteId ? "#a78bfa" : undefined }}
-                onClick={() => { setClienteId(c.id); setMostrarProposta(false); }}>
+                onClick={() => { setClienteId(c.id); setMostrarProposta(false); setPropostaAbertaId(null); }}>
                 {c.nome}
                 <div style={small}>{c.historico_legado ? "Cliente histórico" : c.tipo_pessoa === "pj" ? "Pessoa jurídica" : "Pessoa física"}</div>
               </button>
@@ -280,7 +283,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                   <h3 style={{ marginTop: 0 }}>Negociações remuneradas</h3>
                   <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
                     {negociacoes.map(n => <button key={n.id} style={{ ...botao, textAlign: "left", borderColor: negociacaoId === n.id ? "#a78bfa" : undefined }}
-                      onClick={() => { setNegociacaoId(n.id); setMostrarProposta(false); }}>
+                      onClick={() => { setNegociacaoId(n.id); setMostrarProposta(false); setPropostaAbertaId(null); }}>
                       <strong>{n.titulo}</strong>
                       <span style={{ ...small, display: "block" }}>{n.natureza === "parceria" ? "Parceria remunerada" : "Prestação de serviços"} · {n.status} · Responsável: {n.responsavel_dubworks || "não informado"}</span>
                     </button>)}
@@ -334,7 +337,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                           servico_id: null,
                         }];
                         void executar(async () => {
-                          await criarPropostaCrm({
+                          const id = await criarPropostaCrm({
                             negociacaoId: negociacao.id, titulo: formProposta.titulo,
                             descricaoEscopo: formProposta.escopo, itens: itensParaSalvar,
                             valorManual: formProposta.totalPersonalizado === "" ? null : vDinheiro(formProposta.totalPersonalizado),
@@ -342,8 +345,9 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                             justificativa: formProposta.justificativa.trim() || (formProposta.totalPersonalizado.trim() ? "Valor fechado negociado para o pacote" : ""),
                           });
                           setMostrarProposta(false); setItens([]);
+                          setPropostaAbertaId(id);
                         }, async () => setPropostas(await listarPropostasCrm(negociacao.id)),
-                        "Proposta salva em rascunho! Consulte a lista Propostas logo abaixo.");
+                        "Proposta salva. Confira os detalhes e gere o PDF abaixo.");
                       }} style={{ background: "rgba(0,0,0,.18)", padding: 12, borderRadius: 12, display: "grid", gap: 10 }}>
                         <strong>Nova proposta</strong>
                         <input style={campo} required value={formProposta.titulo} placeholder="Título" onChange={e => setFormProposta(s => ({ ...s, titulo: e.target.value }))} />
@@ -388,6 +392,11 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                     {propostas.map(p => <div key={p.id} style={{ ...small, padding: 8, borderTop: "1px solid rgba(148,163,184,.15)" }}>
                       <strong style={{ color: "#f8fafc" }}>#{p.id} · Versão {p.versao} — {p.titulo}</strong>
                       <div>{dinheiro(Number(p.valor_negociado))} · {p.modo_preco === "personalizado" ? "Preço fechado" : "Tabela de serviços"} · {p.status}</div>
+                      <button type="button" style={{ ...botao, marginTop: 7, marginRight: 8, background: p.id === propostaAbertaId ? "#56328b" : "#241843" }}
+                        aria-expanded={p.id === propostaAbertaId} aria-controls="dw-proposta-detalhes"
+                        onClick={() => setPropostaAbertaId(atual => atual === p.id ? null : p.id)}>
+                        {p.id === propostaAbertaId ? "Ocultar proposta" : "Abrir proposta / Gerar PDF"}
+                      </button>
                       {p.descricao_escopo && <div>Escopo: {p.descricao_escopo}</div>}
                       {(() => {
                         const prox: Record<string,string> = { rascunho: "em_revisao", em_revisao: "aprovada", aprovada: "enviada", enviada: "aceita" };
@@ -399,6 +408,11 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                           )}>{next === "aprovada" ? "Aprovar proposta" : next === "em_revisao" ? "Enviar à revisão" : next === "enviada" ? "Marcar enviada" : "Registrar aceite"}</button> : null;
                       })()}
                     </div>)}
+                    {propostaAberta && cliente && negociacao && (
+                      <CrmProposalDetail key={propostaAberta.id} proposta={propostaAberta} cliente={cliente}
+                        negociacao={negociacao} onClose={() => setPropostaAbertaId(null)}
+                        onSaved={async () => setPropostas(await listarPropostasCrm(negociacao.id))} />
+                    )}
                     <strong>Contratos ({contratos.length})</strong>
                     {contratos.map(c => <ContractWorkflowCard key={c.id} contrato={c} diretor={podeAprovar}
                       recarregar={async () => setContratos(await listarContratosCrm(negociacao.id))} />)}
