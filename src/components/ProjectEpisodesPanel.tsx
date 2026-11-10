@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { ElencoItem, Projeto } from "../types";
+import EpisodeWeeksPanel from "./EpisodeWeeksPanel";
 import {
   enfileirarLembreteWhatsapp,
   criarAtualizarFormulariosProjeto,
@@ -172,16 +173,18 @@ export default function ProjectEpisodesPanel({
     );
   }, [projeto.Elenco, elenco]);
 
+  // Subdivisões antigas (parent_id) não devem aparecer como episódios duplicados.
+  const episodiosPrincipais = useMemo(() => episodios.filter((item) => !item.parent_id), [episodios]);
   const episodiosFiltrados = useMemo(() => {
     const termo = busca.trim().toLocaleLowerCase("pt-BR");
-    if (!termo) return episodios;
-    return episodios.filter((item) =>
+    if (!termo) return episodiosPrincipais;
+    return episodiosPrincipais.filter((item) =>
       [item.numero, item.titulo, statusLabel(item.status)]
         .join(" ")
         .toLocaleLowerCase("pt-BR")
         .includes(termo)
     );
-  }, [episodios, busca]);
+  }, [episodiosPrincipais, busca]);
 
   async function recarregarEpisodios(preferirId?: number | null) {
     try {
@@ -273,14 +276,14 @@ export default function ProjectEpisodesPanel({
         const rotulo = String(resposta.semana || "");
         const encontrado = rotulo.match(/\b(?:EP|Epis[oó]dio)\s*0*(\d+)\b/i);
         const episodioIndicado = encontrado
-          ? episodios.find((item) => item.numero === Number(encontrado[1]))
+          ? episodiosPrincipais.find((item) => item.numero === Number(encontrado[1]))
           : null;
         // Para projetos de episódio único, vinculamos também as entregas legadas.
         // Para múltiplos episódios, nunca atribuímos uma semana arbitrariamente.
         const episodioAssociado =
           episodioIndicado?.id ??
           anterior?.episodio_id ??
-          (episodios.length === 1 ? episodios[0].id : null);
+          (episodiosPrincipais.length === 1 ? episodiosPrincipais[0].id : null);
 
         return {
           ...resposta,
@@ -439,7 +442,7 @@ export default function ProjectEpisodesPanel({
 
     try {
       const numero =
-        episodios.reduce((maior, item) => Math.max(maior, item.numero), 0) + 1;
+        episodiosPrincipais.reduce((maior, item) => Math.max(maior, item.numero), 0) + 1;
       let criado = await criarEpisodioProjeto({
         projetoId: projeto.ID,
         numero,
@@ -826,7 +829,7 @@ export default function ProjectEpisodesPanel({
                 Episódios
               </strong>
               <div style={{ color: "#64748b", fontSize: 12 }}>
-                {episodios.length} cadastrado(s)
+                {episodiosPrincipais.length} cadastrado(s)
               </div>
             </div>
             {podeEditar && (
@@ -1055,6 +1058,14 @@ export default function ProjectEpisodesPanel({
                   </p>
                 )}
               </div>
+
+              <EpisodeWeeksPanel
+                key={episodio.id}
+                projetoId={Number(projeto.ID)}
+                episodioId={episodio.id}
+                podeEditar={podeEditar}
+                usuarioNome={usuarioNome}
+              />
 
               <div
                 style={{
