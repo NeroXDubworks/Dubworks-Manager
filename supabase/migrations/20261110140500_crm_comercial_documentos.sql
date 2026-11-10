@@ -151,6 +151,8 @@ create index if not exists crm_contatos_cliente_idx on public.crm_contatos(clien
 create index if not exists crm_propostas_negociacao_idx on public.crm_propostas(negociacao_id);
 create index if not exists crm_contratos_negociacao_idx on public.crm_contratos(negociacao_id);
 create index if not exists crm_propostas_status_idx on public.crm_propostas(status);
+create unique index if not exists crm_contratos_versao_negociacao_uq on public.crm_contratos(negociacao_id, versao) where negociacao_id is not null;
+create unique index if not exists crm_contratos_versao_parceria_uq on public.crm_contratos(parceria_gratuita_id, versao) where parceria_gratuita_id is not null;
 
 -- Comercial é restrito a Diretoria e ADM na camada de banco, além da interface.
 do $ddl$
