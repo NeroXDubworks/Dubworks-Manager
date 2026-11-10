@@ -24,12 +24,12 @@ const caixa: React.CSSProperties = {
 };
 const botao: React.CSSProperties = {
   border: "1px solid rgba(139,92,246,.36)", borderRadius: 9,
-  background: "rgba(124,58,237,.18)", color: "#e9d5ff",
+  appearance: "none", background: "#241843", color: "#f5edff",
   fontWeight: 700, padding: "9px 13px", cursor: "pointer",
 };
 const small: React.CSSProperties = { fontSize: 12, color: "#94a3b8" };
 function dinheiro(v: number) { return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
-function vDinheiro(v: string) { return Number(v.trim().replace(/\./g, "").replace(",", ".")); }
+function vDinheiro(v: string) { const raw = v.trim(); return Number(raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw); }
 function erroAmigavel(e: any) { return String(e?.message || e || "Erro desconhecido"); }
 
 function ContractWorkflowCard({ contrato, diretor, recarregar }: {
@@ -159,13 +159,17 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
       return calculateProposal(itens, formProposta.totalPersonalizado === "" ? null : vDinheiro(formProposta.totalPersonalizado));
     } catch { return null; }
   }, [itens, formProposta.totalPersonalizado]);
+  // Pacotes com preço fechado não precisam de serviços cadastrados na tabela.
+  // O texto do escopo descreve o pacote; o valor negociado é mantido separado da referência.
+  const pacoteFechado = itens.length === 0 && formProposta.totalPersonalizado.trim() !== "";
+  const podeSalvarProposta = Boolean(valores) && (itens.length > 0 || (pacoteFechado && formProposta.escopo.trim().length > 0));
 
-  async function executar(acao: () => Promise<any>, depois?: () => Promise<void>) {
+  async function executar(acao: () => Promise<any>, depois?: () => Promise<void>, mensagem = "Dados salvos com sucesso.") {
     if (ocupado) return;
     setOcupado(true); setErro(""); setSucesso("");
     try {
       await acao(); if (depois) await depois();
-      setSucesso("Dados salvos com sucesso.");
+      setSucesso(mensagem);
     } catch (e) { setErro(erroAmigavel(e)); }
     finally { setOcupado(false); }
   }
@@ -191,7 +195,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
         {([["comercial", "Clientes e vendas"], ["parcerias", "Parcerias gratuitas"], ["servicos", "Tabela de serviços"]] as const)
           .map(([id, rotulo]) =>
             <button key={id} type="button" onClick={() => { setAba(id); setErro(""); setSucesso(""); }}
-              style={{ ...botao, borderColor: aba === id ? "#a78bfa" : undefined, background: aba === id ? "#4c1d95" : undefined }}>{rotulo}</button>
+              style={{ ...botao, borderColor: aba === id ? "#a78bfa" : "#4b3674", background: aba === id ? "#4c1d95" : "#241843", color: "#f5edff" }}>{rotulo}</button>
           )}
       </nav>
       {erro && <div role="alert" style={{ color: "#fecaca", padding: 12, border: "1px solid #7f1d1d", borderRadius: 10 }}>{erro}</div>}
@@ -309,16 +313,28 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                     {mostrarProposta && (
                       <form onSubmit={e => {
                         e.preventDefault();
+                        if (!podeSalvarProposta) {
+                          setErro("Adicione um serviço ou informe o valor fechado e descreva os serviços no escopo.");
+                          return;
+                        }
+                        const itensParaSalvar = itens.length ? itens : [{
+                          descricao: "Pacote fechado — " + formProposta.escopo.trim().slice(0, 200),
+                          unidade: "projeto",
+                          quantidade: 1,
+                          preco_unitario: 0,
+                          servico_id: null,
+                        }];
                         void executar(async () => {
                           await criarPropostaCrm({
                             negociacaoId: negociacao.id, titulo: formProposta.titulo,
-                            descricaoEscopo: formProposta.escopo, itens,
+                            descricaoEscopo: formProposta.escopo, itens: itensParaSalvar,
                             valorManual: formProposta.totalPersonalizado === "" ? null : vDinheiro(formProposta.totalPersonalizado),
                             custoInterno: formProposta.custoInterno === "" ? null : vDinheiro(formProposta.custoInterno),
                             justificativa: formProposta.justificativa,
                           });
                           setMostrarProposta(false); setItens([]);
-                        }, async () => setPropostas(await listarPropostasCrm(negociacao.id)));
+                        }, async () => setPropostas(await listarPropostasCrm(negociacao.id)),
+                        "Proposta salva em rascunho! Consulte a lista Propostas logo abaixo.");
                       }} style={{ background: "rgba(0,0,0,.18)", padding: 12, borderRadius: 12, display: "grid", gap: 10 }}>
                         <strong>Nova proposta</strong>
                         <input style={campo} required value={formProposta.titulo} placeholder="Título" onChange={e => setFormProposta(s => ({ ...s, titulo: e.target.value }))} />
@@ -345,14 +361,25 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                         </div>
                         {formProposta.totalPersonalizado !== "" && <input style={campo} required placeholder="Justificativa do preço negociado" value={formProposta.justificativa} onChange={e => setFormProposta(s => ({ ...s, justificativa: e.target.value }))} />}
                         <div style={{ color: "#c4b5fd", fontWeight: 700 }}>
-                          {valores ? `Tabela: ${dinheiro(valores.referencia)} · Total negociado: ${dinheiro(valores.negociado)}` : "Confira quantidades e valores."}
+                          {valores
+                            ? `${itens.length ? "Tabela: " + dinheiro(valores.referencia) : "Sem preço de tabela"} · Total negociado: ${dinheiro(valores.negociado)}`
+                            : "Confira quantidades e valores."}
                         </div>
-                        <button type="submit" style={botao} disabled={ocupado || !itens.length || !valores}>Salvar proposta em rascunho</button>
+                        {pacoteFechado && <p style={{ ...small, margin: 0 }}>
+                          Pacote por valor fechado: a descrição do escopo será registrada como serviço personalizado, sem alterar a tabela oficial.
+                        </p>}
+                        {!podeSalvarProposta && <p role="status" style={{ color: "#fde68a", fontSize: 13, margin: 0 }}>
+                          Para salvar, selecione um serviço OU informe preço total personalizado e descreva o escopo.
+                        </p>}
+                        <button type="submit" style={{ ...botao, background: "#432076", color: "#fff" }} disabled={ocupado}>Salvar proposta em rascunho</button>
                       </form>
                     )}
-                    <strong>Propostas ({propostas.length})</strong>
+                    <h4 id="dw-crm-propostas" style={{ color: "#f8fafc", margin: "8px 0 0", scrollMarginTop: 18 }}>Propostas salvas ({propostas.length})</h4>
+                    <p style={{ ...small, margin: 0 }}>As propostas ficam nesta negociação, abaixo do formulário. Você também pode retornar ao cliente e selecionar a negociação para consultá-las.</p>
                     {propostas.map(p => <div key={p.id} style={{ ...small, padding: 8, borderTop: "1px solid rgba(148,163,184,.15)" }}>
-                      Versão {p.versao} — {p.titulo} · {dinheiro(Number(p.valor_negociado))} · {p.modo_preco} · {p.status}
+                      <strong style={{ color: "#f8fafc" }}>#{p.id} · Versão {p.versao} — {p.titulo}</strong>
+                      <div>{dinheiro(Number(p.valor_negociado))} · {p.modo_preco === "personalizado" ? "Preço fechado" : "Tabela de serviços"} · {p.status}</div>
+                      {p.descricao_escopo && <div>Escopo: {p.descricao_escopo}</div>}
                       {(() => {
                         const prox: Record<string,string> = { rascunho: "em_revisao", em_revisao: "aprovada", aprovada: "enviada", enviada: "aceita" };
                         const next = prox[p.status];
