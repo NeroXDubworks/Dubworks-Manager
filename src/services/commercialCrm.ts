@@ -200,3 +200,58 @@ export async function criarRascunhoContratoCrm(params: {
   if (error) throw error;
   return data;
 }
+
+export type CrmContato = {
+  id: number;
+  cliente_id: number;
+  nome: string;
+  cargo: string | null;
+  email: string | null;
+  telefone: string | null;
+  principal: boolean;
+};
+
+export async function listarContatosCrm(clienteId: number): Promise<CrmContato[]> {
+  const { data, error } = await supabase.from("crm_contatos").select("*")
+    .eq("cliente_id", clienteId).order("principal", { ascending: false });
+  if (error) throw error;
+  return (data || []) as CrmContato[];
+}
+
+export async function adicionarContatoCrm(params: {
+  clienteId: number; nome: string; cargo?: string; email?: string;
+  telefone?: string; principal?: boolean;
+}) {
+  if (!params.nome.trim()) throw new Error("Informe o nome do contato.");
+  const { data, error } = await supabase.from("crm_contatos").insert({
+    cliente_id: params.clienteId, nome: params.nome.trim(),
+    cargo: params.cargo?.trim() || null, email: params.email?.trim() || null,
+    telefone: params.telefone?.trim() || null, principal: Boolean(params.principal),
+  }).select("*").single();
+  if (error) throw error;
+  return data as CrmContato;
+}
+export async function listarContratosParceriaGratuita(parceriaId: number) {
+  const { data, error } = await supabase.from("crm_contratos").select("*")
+    .eq("parceria_gratuita_id", parceriaId).order("versao", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function registrarContratoAssinado(params: {
+  contratoId: number; arquivoUrl: string; dataAssinaturaISO: string;
+}) {
+  if (!/^https:\/\//i.test(params.arquivoUrl.trim())) {
+    throw new Error("Informe o link HTTPS do documento efetivamente assinado.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(params.dataAssinaturaISO)) {
+    throw new Error("Informe a data da assinatura.");
+  }
+  const { data, error } = await supabase.from("crm_contratos")
+    .update({
+      arquivo_url: params.arquivoUrl.trim(), status: "assinado",
+      assinaturas_confirmadas_em: params.dataAssinaturaISO,
+    }).eq("id", params.contratoId).neq("status", "assinado").select("id").single();
+  if (error) throw error;
+  return data;
+}
