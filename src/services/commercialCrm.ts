@@ -188,10 +188,17 @@ export async function criarRascunhoContratoCrm(params: {
   if (Boolean(params.negociacaoId) === Boolean(params.parceriaGratuitaId)) {
     throw new Error("Informe uma negociação remunerada ou uma parceria gratuita.");
   }
+  const chave = params.negociacaoId ? "negociacao_id" : "parceria_gratuita_id";
+  const contraparteId = params.negociacaoId || params.parceriaGratuitaId;
+  const { data: versoes, error: erroVersao } = await supabase.from("crm_contratos")
+    .select("versao").eq(chave, contraparteId)
+    .order("versao", { ascending: false }).limit(1);
+  if (erroVersao) throw erroVersao;
+  const versao = Number(versoes?.[0]?.versao || 0) + 1;
   const { data, error } = await supabase.from("crm_contratos").insert({
     negociacao_id: params.negociacaoId ?? null,
     parceria_gratuita_id: params.parceriaGratuitaId ?? null,
-    versao: 1,
+    versao,
     titulo: params.titulo.trim(),
     objeto_escopo: params.objetoEscopo.trim() || null,
     tipo_modelo: params.tipoModelo,
