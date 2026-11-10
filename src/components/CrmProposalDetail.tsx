@@ -4,7 +4,7 @@ import {
   listarItensPropostaCrm,
   type CrmCliente, type CrmNegociacao, type CrmProposta, type CrmPropostaItem,
 } from "../services/commercialCrm";
-import { baixarPdfProposta, gerarPdfProposta } from "../shared/crmProposalPdf.js";
+import CrmOfficialPdfActions from "./CrmOfficialPdfActions";
 
 type Props = {
   proposta: CrmProposta;
@@ -54,29 +54,6 @@ export default function CrmProposalDetail({ proposta, cliente, negociacao, onClo
       .finally(() => { if (ativo) setCarregando(false); });
     return () => { ativo = false; };
   }, [proposta.id]);
-
-  const dados = { proposta, cliente, negociacao, itens };
-  const pronto = !carregando && itens.length > 0;
-
-  function visualizarPdf() {
-    if (!pronto) return;
-    try {
-      setFalha("");
-      const url = URL.createObjectURL(gerarPdfProposta(dados));
-      const aba = window.open(url, "_blank");
-      if (aba) aba.opener = null;
-      if (!aba) {
-        URL.revokeObjectURL(url);
-        setFalha("O navegador bloqueou a abertura. Permita pop-ups ou use Baixar PDF.");
-      } else setTimeout(() => URL.revokeObjectURL(url), 120000);
-    } catch (error: any) { setFalha(String(error?.message || error)); }
-  }
-
-  function baixarPdf() {
-    if (!pronto) return;
-    try { setFalha(""); baixarPdfProposta(dados); }
-    catch (error: any) { setFalha(String(error?.message || error)); }
-  }
 
   async function salvarCondicoes(event: React.FormEvent) {
     event.preventDefault();
@@ -162,13 +139,12 @@ export default function CrmProposalDetail({ proposta, cliente, negociacao, onClo
         </>}
       </div>
       {falha && <p role="alert" style={{ color: "#fda4af", margin: 0 }}>{falha}</p>}
-      <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-        <button type="button" style={btn} disabled={!pronto} onClick={visualizarPdf}>Visualizar PDF</button>
-        <button type="button" style={{ ...btn, background: "#6331a8" }} disabled={!pronto} onClick={baixarPdf}>Baixar PDF para cliente</button>
-      </div>
+      {!carregando && itens.length > 0 && (
+        <CrmOfficialPdfActions kind="proposta" proposta={proposta} cliente={cliente}
+          negociacao={negociacao} itens={itens} />
+      )}
       <div style={{ ...muted, fontSize: 12 }}>
-        O PDF contém cliente, escopo, serviços, preço final e condições comerciais.
-        Custos internos e justificativas de desconto não são incluídos.
+        O modelo PDF oficial não inclui custos internos, margens ou justificativas de valores personalizados.
       </div>
     </section>
   );
