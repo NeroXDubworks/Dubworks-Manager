@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { converterDriveParaPreview } from "../services/appServices";
 import {
   alterarStatusCorte,
@@ -273,15 +274,15 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
         </div>
       )}
 
-      {mostrarNovo && podeEditar && (
-        <div role="presentation" style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,.8)", zIndex: 2500, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}
+      {mostrarNovo && podeEditar && createPortal((
+        <div role="presentation" style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,.85)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, isolation: "isolate" }}
           onMouseDown={e => { if (e.target === e.currentTarget && !salvando) setMostrarNovo(false); }}>
           <form role="dialog" aria-modal="true" aria-label="Cadastrar semana" onSubmit={e => void criar(e)}
-            style={{ ...painel, width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 12 }}>
+            style={{ ...painel, position: "relative", zIndex: 1, width: "100%", maxWidth: 500, maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 12, boxShadow: "0 30px 100px rgba(0,0,0,.85)", background: "#11162c" }}>
             <h3 style={{ color: "#f8fafc", margin: 0 }}>Cadastrar {cutLabel(cortes.reduce((max, c) => Math.max(max, c.semana), 0) + 1)}</h3>
             <p style={{ ...texto, margin: 0 }}>Uma semana = um único corte. Informe sua duração real, mesmo que não tenha exatamente cinco minutos.</p>
             <label style={texto}>Duração (MM:SS) *
-              <input style={campo} required value={novo.duracao} placeholder="04:48" onChange={e => setNovo(s => ({ ...s, duracao: e.target.value }))} />
+              <input style={campo} autoFocus required value={novo.duracao} placeholder="04:48" onChange={e => setNovo(s => ({ ...s, duracao: e.target.value }))} />
             </label>
             <label style={texto}>Prazo
               <input style={campo} type="date" value={novo.prazoEm} onChange={e => setNovo(s => ({ ...s, prazoEm: e.target.value }))} />
@@ -301,7 +302,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
             </div>
           </form>
         </div>
-      )}
+      ), document.body)}
     </section>
   );
 }
