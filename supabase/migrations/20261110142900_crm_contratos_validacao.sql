@@ -17,9 +17,10 @@ begin
   cargo := app_private.current_profile() ->> 'cargo';
 
   if old.status in ('aprovado','enviado','aguardando_assinatura')
-    and (new.arquivo_url is distinct from old.arquivo_url or
-         new.objeto_escopo is distinct from old.objeto_escopo or
-         new.tipo_modelo is distinct from old.tipo_modelo) then
+    and (new.objeto_escopo is distinct from old.objeto_escopo or
+         new.tipo_modelo is distinct from old.tipo_modelo or
+         (new.arquivo_url is distinct from old.arquivo_url
+            and not (old.status = 'aguardando_assinatura' and new.status = 'assinado'))) then
       raise exception 'Documento aprovado/enviado não pode ser alterado; crie nova versão'
         using errcode = '23514';
   end if;
