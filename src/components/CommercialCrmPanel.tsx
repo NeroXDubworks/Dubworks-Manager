@@ -34,13 +34,14 @@ function dinheiro(v: number) { return v.toLocaleString("pt-BR", { style: "curren
 function vDinheiro(v: string) { const raw = v.trim(); return Number(raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw); }
 function erroAmigavel(e: any) { return String(e?.message || e || "Erro desconhecido"); }
 
-function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociacao, parceria }: {
+function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociacao, parceria, propostaAceita }: {
   contrato: any;
   diretor: boolean;
   recarregar: () => Promise<void>;
   cliente?: CrmCliente | null;
   negociacao?: CrmNegociacao | null;
   parceria?: ParceriaGratuita | null;
+  propostaAceita?: CrmProposta | null;
 }) {
   const [aberto, setAberto] = useState(false);
   const [url, setUrl] = useState(String(contrato.arquivo_url || ""));
@@ -65,7 +66,8 @@ function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociac
       aria-controls={"dw-contrato-detalhe-" + contrato.id} onClick={() => setAberto(v => !v)}>
       {aberto ? "Fechar detalhes do contrato" : "Abrir contrato / Visualizar"}
     </button>
-    {aberto && <CrmContractPreview contrato={contrato} cliente={cliente} negociacao={negociacao} parceria={parceria} />}
+    {aberto && <CrmContractPreview contrato={contrato} cliente={cliente} negociacao={negociacao}
+      parceria={parceria} propostaAceita={propostaAceita} />}
     {contrato.arquivo_url && <a href={contrato.arquivo_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir documento ↗</a>}
     {(contrato.status === "rascunho" || contrato.status === "em_revisao") && (
       <form onSubmit={e => { e.preventDefault(); void executarLocal(() => anexarDocumentoContratoCrm(contrato.id, url)); }} style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -428,6 +430,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                     <strong>Contratos ({contratos.length})</strong>
                     {contratos.map(c => <ContractWorkflowCard key={c.id} contrato={c} diretor={podeAprovar}
                       cliente={cliente} negociacao={negociacao}
+                      propostaAceita={propostas.find(p => p.status === "aceita") || null}
                       recarregar={async () => setContratos(await listarContratosCrm(negociacao.id))} />)}
                     <span style={small}>Contratos são rascunhos até aprovação, revisão jurídica e arquivamento do documento efetivamente assinado.</span>
                   </div>

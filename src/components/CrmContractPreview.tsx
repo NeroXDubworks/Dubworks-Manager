@@ -1,6 +1,6 @@
-import React, { useState } from "react";
-import type { CrmCliente, CrmNegociacao, ParceriaGratuita } from "../services/commercialCrm";
-import { baixarPdfMinutaContrato, gerarPdfMinutaContrato } from "../shared/crmContractPdf.js";
+import React from "react";
+import type { CrmCliente, CrmNegociacao, CrmProposta, ParceriaGratuita } from "../services/commercialCrm";
+import CrmOfficialPdfActions from "./CrmOfficialPdfActions";
 
 export type ContratoCrmBasico = {
   id: number;
@@ -45,41 +45,19 @@ function urlValida(url: string | null | undefined): url is string {
 }
 
 export default function CrmContractPreview({
-  contrato, cliente, negociacao, parceria,
+  contrato, cliente, negociacao, parceria, propostaAceita,
 }: {
   contrato: ContratoCrmBasico;
   cliente?: CrmCliente | null;
   negociacao?: CrmNegociacao | null;
   parceria?: ParceriaGratuita | null;
+  propostaAceita?: CrmProposta | null;
 }) {
-  const [erro, setErro] = useState("");
-  const dados = { contrato, cliente, negociacao, parceria };
   const preliminar = ["rascunho", "em_revisao"].includes(contrato.status);
   const possuiDocumento = urlValida(contrato.arquivo_url);
   const nomeContraparte = cliente?.nome || parceria?.nome_parceiro || "Contraparte não informada";
   const escopo = contrato.objeto_escopo || negociacao?.escopo || parceria?.escopo || "";
   const contexto = titulos[contrato.tipo_modelo] || contrato.tipo_modelo;
-
-  function visualizarMinuta() {
-    setErro("");
-    try {
-      const url = URL.createObjectURL(gerarPdfMinutaContrato(dados));
-      const aba = window.open(url, "_blank");
-      if (!aba) {
-        URL.revokeObjectURL(url);
-        setErro("O navegador bloqueou a prévia. Permita pop-ups ou use Baixar minuta PDF.");
-        return;
-      }
-      aba.opener = null;
-      setTimeout(() => URL.revokeObjectURL(url), 120000);
-    } catch (error: any) { setErro(String(error?.message || error)); }
-  }
-
-  function baixarMinuta() {
-    setErro("");
-    try { baixarPdfMinutaContrato(dados); }
-    catch (error: any) { setErro(String(error?.message || error)); }
-  }
 
   return <section id={"dw-contrato-detalhe-" + contrato.id} aria-label={"Detalhes do contrato " + contrato.id}
     style={{ borderRadius: 12, padding: 16, background: "rgba(8,15,35,.86)",
@@ -129,12 +107,9 @@ export default function CrmContractPreview({
         A minuta gerada pelo sistema contém apenas os dados já cadastrados e indica as informações faltantes.
         Não é um contrato final: precisa de cláusulas completas, conferência das partes e revisão humana/jurídica antes do envio ou assinatura.
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 9 }}>
-        <button type="button" style={botao} onClick={visualizarMinuta}>Visualizar minuta PDF</button>
-        <button type="button" style={{ ...botao, background: "#5a2f96" }} onClick={baixarMinuta}>Baixar minuta PDF</button>
-      </div>
+      <CrmOfficialPdfActions kind="contrato" contrato={contrato} cliente={cliente}
+        negociacao={negociacao} parceria={parceria} propostaAceita={propostaAceita} />
     </>}
-    {erro && <span role="alert" style={{ color: "#fda4af", fontSize: 13 }}>{erro}</span>}
     <div style={{ ...pequeno, fontSize: 12 }}>
       Fluxo de aprovação: rascunho → revisão → aprovação da diretoria → envio → assinatura → arquivamento.
       O sistema não considera o contrato assinado automaticamente.
