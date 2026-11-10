@@ -17,7 +17,6 @@ const itens = Array.from({ length: 5 }, (_, i) => ({
   descricao: "Serviço " + (i + 1), quantidade: 1, unidade: "projeto", preco_unitario: 5000,
 }));
 const personalizada = camposPropostaOficial({ cliente, negociacao, proposta, itens });
-assert.equal(personalizada.fields.total, "R$ 690,00".replace(/\u00a0/g, " ") === personalizada.fields.total ? personalizada.fields.total : personalizada.fields.total);
 assert.match(personalizada.fields.total, /690,00/);
 assert.match(personalizada.fields.item_1, /Pacote fechado/);
 assert.match(personalizada.fields.unit_1, /690,00/);
