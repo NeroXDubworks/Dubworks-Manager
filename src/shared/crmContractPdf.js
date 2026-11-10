@@ -60,6 +60,9 @@ const modelos = {
 
 export function gerarPdfMinutaContrato({ contrato, cliente = null, negociacao = null, parceria = null }) {
   if (!contrato?.id || (!cliente && !parceria)) throw new Error("Dados do contrato/contraparte indisponíveis.");
+  if (!["rascunho", "em_revisao"].includes(contrato.status)) {
+    throw new Error("Esta versão não é mais rascunho. Consulte o documento revisado/anexado ao contrato.");
+  }
   const pages = [[]];
   let p = 0;
   let y = PH - 45;
