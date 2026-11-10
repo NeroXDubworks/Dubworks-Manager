@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  adicionarContatoCrm, criarClienteCrm, criarNegociacaoCrm, criarParceriaGratuita,
+  adicionarContatoCrm, anexarDocumentoContratoCrm, alterarStatusContratoCrm, alterarStatusPropostaCrm,
+  criarClienteCrm, criarNegociacaoCrm, criarParceriaGratuita,
   criarPropostaCrm, criarRascunhoContratoCrm, criarServicoCrm,
   listarClientesCrm, listarContatosCrm, listarContratosCrm,
   listarContratosParceriaGratuita, listarNegociacoesCrm, listarParceriasGratuitas,
@@ -31,7 +32,56 @@ function dinheiro(v: number) { return v.toLocaleString("pt-BR", { style: "curren
 function vDinheiro(v: string) { return Number(v.trim().replace(/\./g, "").replace(",", ".")); }
 function erroAmigavel(e: any) { return String(e?.message || e || "Erro desconhecido"); }
 
-export default function CommercialCrmPanel({ responsavel }: { responsavel: string }) {
+function ContractWorkflowCard({ contrato, diretor, recarregar }: {
+  contrato: any; diretor: boolean; recarregar: () => Promise<void>;
+}) {
+  const [url, setUrl] = useState(String(contrato.arquivo_url || ""));
+  const [dataAssinatura, setDataAssinatura] = useState(new Date().toISOString().slice(0, 10));
+  const [ocupado, setOcupado] = useState(false);
+  const [erroLocal, setErroLocal] = useState("");
+  const etapas: Record<string,string> = {
+    rascunho: "em_revisao", em_revisao: "aprovado",
+    aprovado: "enviado", enviado: "aguardando_assinatura",
+  };
+  const proxima = etapas[contrato.status];
+  async function executarLocal(acao: () => Promise<any>) {
+    setOcupado(true); setErroLocal("");
+    try { await acao(); await recarregar(); }
+    catch (e) { setErroLocal(erroAmigavel(e)); }
+    finally { setOcupado(false); }
+  }
+  return <div style={{ padding: 10, border: "1px solid rgba(148,163,184,.16)", borderRadius: 10, display: "grid", gap: 7 }}>
+    <strong>{contrato.titulo} · {contrato.status}</strong>
+    {contrato.arquivo_url && <a href={contrato.arquivo_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir documento ↗</a>}
+    {(contrato.status === "rascunho" || contrato.status === "em_revisao") && (
+      <form onSubmit={e => { e.preventDefault(); void executarLocal(() => anexarDocumentoContratoCrm(contrato.id, url)); }} style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <input style={{ ...campo, flex: 1 }} type="url" required value={url} onChange={e => setUrl(e.target.value)} placeholder="Link HTTPS do PDF para revisão" />
+        <button type="submit" style={botao} disabled={ocupado}>Anexar documento</button>
+      </form>
+    )}
+    {proxima && (proxima !== "aprovado" || diretor) && <button type="button" style={{ ...botao, justifySelf: "start" }} disabled={ocupado} onClick={() => void executarLocal(() => alterarStatusContratoCrm(contrato.id, contrato.status, proxima))}>
+      {proxima === "em_revisao" ? "Enviar à revisão" : proxima === "aprovado" ? "Aprovar como diretoria" : proxima === "enviado" ? "Marcar como enviado" : "Aguardar assinatura"}
+    </button>}
+    {contrato.status === "aguardando_assinatura" && (
+      <form onSubmit={e => {
+        e.preventDefault();
+        if (!window.confirm("Confirma que o documento foi efetivamente assinado por todas as partes?")) return;
+        void executarLocal(() => registrarContratoAssinado({ contratoId: contrato.id, arquivoUrl: url, dataAssinaturaISO: dataAssinatura }));
+      }} style={{ display: "grid", gap: 8 }}>
+        <label style={small}>Link do documento efetivamente assinado
+          <input style={campo} required type="url" value={url} onChange={e => setUrl(e.target.value)} />
+        </label>
+        <label style={small}>Data de assinatura
+          <input style={campo} type="date" required value={dataAssinatura} onChange={e => setDataAssinatura(e.target.value)} />
+        </label>
+        <button style={botao} type="submit" disabled={ocupado}>Registrar assinatura conferida</button>
+      </form>
+    )}
+    {erroLocal && <span role="alert" style={{ color: "#fda4af", fontSize: 12 }}>{erroLocal}</span>}
+  </div>;
+}
+
+export default function CommercialCrmPanel({ responsavel, podeAprovar = false }: { responsavel: string; podeAprovar?: boolean }) {
   const [aba, setAba] = useState<Tab>("comercial");
   const [clientes, setClientes] = useState<CrmCliente[]>([]);
   const [clienteId, setClienteId] = useState<number | null>(null);
@@ -303,12 +353,19 @@ export default function CommercialCrmPanel({ responsavel }: { responsavel: strin
                     <strong>Propostas ({propostas.length})</strong>
                     {propostas.map(p => <div key={p.id} style={{ ...small, padding: 8, borderTop: "1px solid rgba(148,163,184,.15)" }}>
                       Versão {p.versao} — {p.titulo} · {dinheiro(Number(p.valor_negociado))} · {p.modo_preco} · {p.status}
+                      {(() => {
+                        const prox: Record<string,string> = { rascunho: "em_revisao", em_revisao: "aprovada", aprovada: "enviada", enviada: "aceita" };
+                        const next = prox[p.status];
+                        return next && (next !== "aprovada" || podeAprovar) ? <button type="button" style={{ ...botao, marginLeft: 8 }}
+                          disabled={ocupado} onClick={() => void executar(
+                            () => alterarStatusPropostaCrm(p.id, p.status, next, responsavel),
+                            async () => setPropostas(await listarPropostasCrm(negociacao.id))
+                          )}>{next === "aprovada" ? "Aprovar proposta" : next === "em_revisao" ? "Enviar à revisão" : next === "enviada" ? "Marcar enviada" : "Registrar aceite"}</button> : null;
+                      })()}
                     </div>)}
                     <strong>Contratos ({contratos.length})</strong>
-                    {contratos.map(c => <div key={c.id} style={{ ...small, padding: 8, borderTop: "1px solid rgba(148,163,184,.15)" }}>
-                      {c.titulo} · {c.status}
-                      {c.arquivo_url && <a style={{ color: "#c4b5fd", marginLeft: 8 }} href={c.arquivo_url} target="_blank" rel="noopener noreferrer">Documento ↗</a>}
-                    </div>)}
+                    {contratos.map(c => <ContractWorkflowCard key={c.id} contrato={c} diretor={podeAprovar}
+                      recarregar={async () => setContratos(await listarContratosCrm(negociacao.id))} />)}
                     <span style={small}>Contratos são rascunhos até aprovação, revisão jurídica e arquivamento do documento efetivamente assinado.</span>
                   </div>
                 )}
@@ -363,7 +420,8 @@ export default function CommercialCrmPanel({ responsavel }: { responsavel: strin
             }, async () => setContratosParceria(await listarContratosParceriaGratuita(parceria.id)))}>
               + Elaborar termo/contrato gratuito
             </button>
-            {contratosParceria.map(c => <div key={c.id} style={small}>{c.titulo} · {c.status}</div>)}
+            {contratosParceria.map(c => <ContractWorkflowCard key={c.id} contrato={c} diretor={podeAprovar}
+              recarregar={async () => setContratosParceria(await listarContratosParceriaGratuita(parceria.id))} />)}
           </div>}
         </div>
       )}
