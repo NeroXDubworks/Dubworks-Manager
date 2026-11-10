@@ -330,7 +330,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                             descricaoEscopo: formProposta.escopo, itens: itensParaSalvar,
                             valorManual: formProposta.totalPersonalizado === "" ? null : vDinheiro(formProposta.totalPersonalizado),
                             custoInterno: formProposta.custoInterno === "" ? null : vDinheiro(formProposta.custoInterno),
-                            justificativa: formProposta.justificativa,
+                            justificativa: formProposta.justificativa.trim() || (formProposta.totalPersonalizado.trim() ? "Valor fechado negociado para o pacote" : ""),
                           });
                           setMostrarProposta(false); setItens([]);
                         }, async () => setPropostas(await listarPropostasCrm(negociacao.id)),
@@ -359,7 +359,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                             <input style={campo} placeholder="Ex.: 400,00" value={formProposta.custoInterno} onChange={e => setFormProposta(s => ({ ...s, custoInterno: e.target.value }))} />
                           </label>
                         </div>
-                        {formProposta.totalPersonalizado !== "" && <input style={campo} required placeholder="Justificativa do preço negociado" value={formProposta.justificativa} onChange={e => setFormProposta(s => ({ ...s, justificativa: e.target.value }))} />}
+                        {formProposta.totalPersonalizado !== "" && <label style={small}>Observação sobre valor negociado (opcional; sem preenchimento, usamos “Valor fechado negociado para o pacote”)<input style={campo} placeholder="Ex.: desconto especial ou valor fechado por pacote" value={formProposta.justificativa} onChange={e => setFormProposta(s => ({ ...s, justificativa: e.target.value }))} /></label>}
                         <div style={{ color: "#c4b5fd", fontWeight: 700 }}>
                           {valores
                             ? `${itens.length ? "Tabela: " + dinheiro(valores.referencia) : "Sem preço de tabela"} · Total negociado: ${dinheiro(valores.negociado)}`
