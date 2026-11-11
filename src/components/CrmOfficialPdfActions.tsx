@@ -90,6 +90,7 @@ export default function CrmOfficialPdfActions(props: Props) {
   const [historico, setHistorico] = useState<DocumentoGeradoCrm[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [signedFile, setSignedFile] = useState<File | null>(null);
   const [open, setOpen] = useState(false);
   const isDraft = ["rascunho","em_revisao"].includes(entity.status);
   const podeGerar = isProposal || isDraft;
@@ -206,6 +207,33 @@ export default function CrmOfficialPdfActions(props: Props) {
     }
   }
 
+  async function archiveSigned() {
+    if (isProposal || entity.status !== "assinado" || !signedFile || busy) return;
+    setBusy(true); setError(""); setFeedback("");
+    try {
+      if (!signedFile.name.toLowerCase().endsWith(".pdf")) {
+        throw new Error("Selecione um arquivo PDF assinado.");
+      }
+      const binary = signedFile.type === "application/pdf" ? signedFile
+        : new Blob([await signedFile.arrayBuffer()], { type: "application/pdf" });
+      const archive = await arquivarPdfCrm({
+        tipo: "contrato", id: entity.id, categoria: "assinado",
+        blob: binary,
+        nomeArquivo: "DubWorks-Contrato-Assinado-" + entity.id + "-" +
+          signedFile.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 85),
+        campos: {},
+      });
+      setHistorico(prev => [archive, ...prev]);
+      setFeedback("Contrato assinado preservado no histórico do CRM.");
+      setSignedFile(null);
+      await syncDrive(archive.id);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return <div style={{ display: "grid", gap: 12, padding: 13, borderRadius: 12,
     background: "#100e28", border: "1px solid #514078" }}>
     <div>
@@ -280,6 +308,23 @@ export default function CrmOfficialPdfActions(props: Props) {
     </div> : <p style={{ ...small, margin: 0 }}>
       Este contrato já saiu da fase de minuta. Reabra os arquivos anteriores abaixo e consulte o documento final anexado.
     </p>}
+    {!isProposal && entity.status === "assinado" && <div style={{
+      display: "grid", gap: 8, padding: 11, borderRadius: 10,
+      border: "1px solid #525f86", background: "#16213a",
+    }}>
+      <strong>Arquivar PDF efetivamente assinado</strong>
+      <p style={{ ...small, margin: 0 }}>
+        Selecione o documento final assinado. Ele será preservado no CRM e enviado à pasta
+        privada "Documentos Assinados" do Drive. O arquivo não altera o status do contrato.
+      </p>
+      <input type="file" accept="application/pdf,.pdf" disabled={busy}
+        aria-label="Arquivo do contrato assinado" style={{ ...editable, maxWidth: 420 }}
+        onChange={e => setSignedFile(e.target.files?.[0] || null)} />
+      <button type="button" disabled={busy || !signedFile} style={{ ...button, justifySelf: "start" }}
+        onClick={() => void archiveSigned()}>
+        {busy ? "Arquivando..." : "Arquivar contrato assinado"}
+      </button>
+    </div>}
     <div style={{ display: "grid", gap: 8, borderTop: "1px solid #403557", paddingTop: 12 }}>
       <strong style={{ fontSize: 14 }}>Histórico de PDFs arquivados ({historico.length})</strong>
       {loadingHistory && <div style={small}>Carregando arquivos anteriores...</div>}
@@ -287,7 +332,7 @@ export default function CrmOfficialPdfActions(props: Props) {
       {historico.map(arquivo => <div key={arquivo.id}
         style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #403557", padding: "8px 0" }}>
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 12, fontWeight: 650, overflowWrap: "anywhere" }}>#{arquivo.id} · {arquivo.nome_arquivo}</div>
+          <div style={{ fontSize: 12, fontWeight: 650, overflowWrap: "anywhere" }}>#{arquivo.id} · {arquivo.categoria === "assinado" ? "[ASSINADO] " : ""}{arquivo.nome_arquivo}</div>
           <div style={small}>{new Date(arquivo.criado_em).toLocaleString("pt-BR")} · Arquivado no CRM</div>
         </div>
         <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, true)}>Abrir</button>
