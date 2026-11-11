@@ -88,6 +88,7 @@ export default function CrmOfficialPdfActions(props: Props) {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [open, setOpen] = useState(false);
   const isDraft = ["rascunho","em_revisao"].includes(entity.status);
+  const podeGerar = isProposal || isDraft;
 
   useEffect(() => {
     let active = true;
@@ -184,7 +185,7 @@ export default function CrmOfficialPdfActions(props: Props) {
     background: "#100e28", border: "1px solid #514078" }}>
     <div>
       <strong style={{ fontSize: 16 }}>
-        {isProposal ? "PDF oficial da proposta" : "PDF oficial da minuta contratual"}
+        {isProposal ? "PDF oficial da proposta" : isDraft ? "PDF oficial da minuta contratual" : "Histórico de PDFs do contrato"}
       </strong>
       <p style={{ ...small, margin: "5px 0 0" }}>
         Preenche o modelo original da DubWorks com os dados da negociação; conserva a identidade visual.
@@ -192,9 +193,9 @@ export default function CrmOfficialPdfActions(props: Props) {
           " Modelo de 9 páginas, com as cláusulas originais e o Anexo Único."}
       </p>
     </div>
-    <div style={{ ...small, color: "#d8c4f4" }}>
+    {podeGerar && <div style={{ ...small, color: "#d8c4f4" }}>
       {filledCount} de {totalCount} campos do modelo disponíveis para preenchimento. Campos sem dados ficam em branco.
-    </div>
+    </div>}
     {!isProposal && <div role="status" style={{ padding: 10, background: "#3c2c17", color: "#ffdeae", fontSize: 12, borderRadius: 8 }}>
       <strong>Minuta — não é um contrato pronto para assinatura.</strong> Confira a parte legal responsável pela DubWorks, autorizações,
       valores e prazos. {incomplete.length} campos essenciais dependem de conferência antes da formalização.
@@ -204,12 +205,12 @@ export default function CrmOfficialPdfActions(props: Props) {
       <div role="status" style={{ ...small, color: "#fde68a" }}>
         Proposta não aprovada: o PDF será marcado como rascunho.
       </div>}
-    <button type="button" onClick={() => setOpen(v => !v)}
+    {podeGerar && <button type="button" onClick={() => setOpen(v => !v)}
       style={{ ...button, justifySelf: "start", background: "#22183b" }}
       aria-expanded={open}>
       {open ? "Ocultar campos complementares" : "Conferir / completar campos do PDF"}
-    </button>
-    {open && <div style={{ display: "grid", gap: 10 }}>
+    </button>}
+    {open && podeGerar && <div style={{ display: "grid", gap: 10 }}>
       <p style={{ ...small, margin: 0 }}>
         Os dados principais são automáticos. Complete apenas o que faltar; nenhuma condição será presumida.
         {isProposal ? " Pagamento e validade devem ser editados no cadastro da proposta." :
@@ -235,7 +236,7 @@ export default function CrmOfficialPdfActions(props: Props) {
     </button>}
     {feedback && <div role="status" style={{ color: "#a7f3d0", fontSize: 13 }}>{feedback}</div>}
     {error && <div role="alert" style={{ color: "#fda4af", fontSize: 13 }}>{error}</div>}
-    <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+    {podeGerar ? <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
       <button type="button" disabled={busy} style={button} onClick={() => void generate(true)}>
         {busy ? "Preparando PDF..." : isProposal ? "Visualizar proposta oficial" : "Visualizar contrato oficial (minuta)"}
       </button>
@@ -243,7 +244,9 @@ export default function CrmOfficialPdfActions(props: Props) {
         onClick={() => void generate(false)}>
         {busy ? "Preparando..." : isProposal ? "Baixar proposta oficial" : "Baixar contrato oficial (minuta)"}
       </button>
-    </div>
+    </div> : <p style={{ ...small, margin: 0 }}>
+      Este contrato já saiu da fase de minuta. Reabra os arquivos anteriores abaixo e consulte o documento final anexado.
+    </p>}
     <div style={{ display: "grid", gap: 8, borderTop: "1px solid #403557", paddingTop: 12 }}>
       <strong style={{ fontSize: 14 }}>Histórico de PDFs arquivados ({historico.length})</strong>
       {loadingHistory && <div style={small}>Carregando arquivos anteriores...</div>}
