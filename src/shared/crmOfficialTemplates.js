@@ -1,3 +1,4 @@
+import { CAMPOS_MODELO } from "./crmOfficialFieldPositions.js";
 /**
  * Preenche os PDFs oficiais que a diretoria forneceu, preservando integralmente
  * as páginas e a identidade visual originais. Os arquivos são servidos pelo
@@ -65,23 +66,41 @@ async function templateDoc(kind) {
   return { bytes, lib };
 }
 
-function fit(form, key, raw, limits, appendix) {
-  const field = form.getTextField(key);
+function fitForStamp(key, raw, limits, appendix) {
   const original = clean(raw);
-  let shown = original;
   const limit = limits[key] || 58;
   if (original.length > limit) {
     appendix.push({ label: key.replace(/_/g, " ").toUpperCase(), value: original });
-    shown = "VER ANEXO COMPLEMENTAR";
+    return "VER ANEXO COMPLEMENTAR";
   }
-  field.setText(shown);
-  const isLong = ["objetivo", "anexo_descricao", "anexo_entregas", "anexo_etapas",
-    "anexo_direitos", "anexo_creditos", "anexo_observacoes"].includes(key);
-  if (isLong) field.enableMultiline();
-  // Evita texto cortado nos campos pequenos do layout oficial.
-  const small = /^(qtd_|unit_|subtotal_|total$)/.test(key);
-  const fontsize = small ? 7 : isLong ? 9 : 8;
-  try { field.setFontSize(fontsize); } catch (_) { /* O modelo possui fonte padrão; pdf-lib ajusta automaticamente. */ }
+  return original;
+}
+
+function desenharCampo(doc, font, cor, name, value, rect) {
+  if (!value) return;
+  const [pageIndex, x, top, width, height] = rect;
+  const page = doc.getPages()[pageIndex];
+  if (!page) throw new Error("Posição de campo inválida: " + name);
+  const { height: pageHeight } = page.getSize();
+  const multiline = height >= 38;
+  let size = width < 100 ? 7.3 : multiline ? 9.2 : 9;
+  let lines = wrapped(value, font, size, width - 12);
+  const maxHeight = height - 6;
+  while ((lines.length * size * 1.2 > maxHeight || lines.some(t => font.widthOfTextAtSize(t, size) > width - 10)) && size > 6.4) {
+    size -= 0.4;
+    lines = wrapped(value, font, size, width - 12);
+  }
+  if (lines.length * size * 1.2 > maxHeight) {
+    throw new Error("O campo " + name + " excede a área do modelo. Reduza o texto ou inclua no anexo.");
+  }
+  const lineHeight = size * 1.2;
+  const textHeight = lines.length * lineHeight;
+  const topPadding = multiline ? 6 : Math.max(5, (height - textHeight) / 2);
+  let baseline = pageHeight - top - topPadding - size;
+  for (const line of lines) {
+    if (line) page.drawText(line, { x: x + 6, y: baseline, size, font, color: cor });
+    baseline -= lineHeight;
+  }
 }
 
 function wrapped(text, font, size, maxWidth) {
@@ -264,22 +283,35 @@ export function camposContratoOficial({ contrato, cliente = null, negociacao = n
  */
 export async function renderizarPdfOficial(kind, data, templateBytes, lib) {
   if (!["proposta", "contrato"].includes(kind)) throw new Error("Modelo de PDF desconhecido.");
-  const pdf = await lib.PDFDocument.load(templateBytes);
+  const original = await lib.PDFDocument.load(templateBytes);
   const paginasModelo = kind === "proposta" ? 3 : 9;
-  if (pdf.getPageCount() !== paginasModelo) {
+  if (original.getPageCount() !== paginasModelo) {
     throw new Error("Modelo oficial incompatível: número de páginas inesperado.");
   }
-  const form = pdf.getForm();
+
+  // Não modificar o AcroForm de origem. O pdf-lib pode deixar referências
+  // xref órfãs mesmo sem flatten. As páginas visuais são copiadas para um
+  // documento novo, e os valores são impressos por cima nos retângulos oficiais.
+  // Isso resulta num PDF não editável, sem widgets ou refs órfãs do formulário.
+  const pdf = await lib.PDFDocument.create();
+  const embutidas = await pdf.embedPdf(templateBytes);
+  for (const folha of embutidas) {
+    const pagina = pdf.addPage([folha.width, folha.height]);
+    pagina.drawPage(folha, { x: 0, y: 0, width: folha.width, height: folha.height });
+  }
+
   const { fields, appendix } = kind === "proposta" ? camposPropostaOficial(data) : camposContratoOficial(data);
   const limits = kind === "proposta" ? PROPOSAL_LIMITS : CONTRACT_LIMITS;
-  for (const [name, value] of Object.entries(fields)) fit(form, name, value, limits, appendix);
+  const positions = CAMPOS_MODELO[kind];
   const font = await pdf.embedFont(lib.StandardFonts.Helvetica);
-  form.updateFieldAppearances(font);
-  // pdf-lib 1.17.1 pode deixar refs xref órfãs ao aplicar flatten()
-  // em AcroForms existentes. O Edge rejeita a exportação (0 páginas).
-  // Manter os campos preenchidos como somente leitura evita corromper a
-  // estrutura e preserva a aparência original do modelo.
-  for (const campo of form.getFields()) campo.enableReadOnly();
+  const color = lib.rgb(0.14, 0.15, 0.25);
+  for (const [name, value] of Object.entries(fields)) {
+    const rect = positions[name];
+    if (!rect) throw new Error("Campo sem posição no modelo: " + name);
+    const shown = fitForStamp(name, value, limits, appendix);
+    desenharCampo(pdf, font, color, name, shown, rect);
+  }
+
   if (kind === "proposta" && !["aprovada", "enviada", "aceita"].includes(data.proposta.status)) {
     await identifyDraft(pdf, lib, "RASCUNHO - AGUARDANDO APROVAÇÃO");
   }
@@ -287,16 +319,13 @@ export async function renderizarPdfOficial(kind, data, templateBytes, lib) {
   pdf.setTitle(kind === "proposta" ? "DubWorks - Proposta comercial" : "DubWorks - Minuta de contrato");
   pdf.setAuthor("DubWorks");
 
-  // pdf-lib, por padrão, usa object streams. Alguns PDFs preenchidos assim
-  // abrem no Drive, mas são rejeitados por leitores locais como Edge.
   const bytes = await pdf.save({ useObjectStreams: false, updateFieldAppearances: false, addDefaultPage: false });
   if (bytes.byteLength < 20000 || bytes[0] !== 37 || bytes[1] !== 80 || bytes[2] !== 68 || bytes[3] !== 70) {
     throw new Error("Falha na exportação: o arquivo PDF ficou incompleto.");
   }
-  // Não disponibilizar downloads que nem mesmo o parser consegue ler.
   const conferencia = await lib.PDFDocument.load(bytes);
-  if (conferencia.getPageCount() < paginasModelo) {
-    throw new Error("Falha na exportação: páginas do PDF ausentes. Nenhum arquivo foi baixado.");
+  if (conferencia.getPageCount() < paginasModelo || conferencia.getForm().getFields().length > 0) {
+    throw new Error("Falha na exportação: páginas ausentes ou formulário não removido.");
   }
   return new Blob([bytes], { type: "application/pdf" });
 }
