@@ -4,7 +4,7 @@ import type {
 } from "../services/commercialCrm";
 import type { ContratoCrmBasico } from "./CrmContractPreview";
 import {
-  salvarCamposPdfCrm, arquivarPdfCrm, listarDocumentosCrm, baixarDocumentoArquivadoCrm,
+  salvarCamposPdfCrm, arquivarPdfCrm, listarDocumentosCrm, baixarDocumentoArquivadoCrm, sincronizarDocumentoDriveCrm,
   type DocumentoGeradoCrm,
 } from "../services/commercialCrm";
 import {
@@ -86,6 +86,7 @@ export default function CrmOfficialPdfActions(props: Props) {
   const [feedback, setFeedback] = useState("");
   const [historico, setHistorico] = useState<DocumentoGeradoCrm[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [syncingId, setSyncingId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const isDraft = ["rascunho","em_revisao"].includes(entity.status);
   const podeGerar = isProposal || isDraft;
@@ -122,6 +123,21 @@ export default function CrmOfficialPdfActions(props: Props) {
     setFeedback("Informações complementares salvas no Supabase.");
   }
 
+  async function syncDrive(arquivoId: number): Promise<void> {
+    setSyncingId(arquivoId);
+    try {
+      const resultado = await sincronizarDocumentoDriveCrm(arquivoId);
+      setHistorico(atual => atual.map(arquivo => arquivo.id === arquivoId
+        ? { ...arquivo, drive_url: resultado.drive_url, drive_file_id: resultado.drive_file_id }
+        : arquivo));
+      setFeedback("Documento arquivado no CRM e sincronizado com o Drive restrito.");
+    } catch (e: any) {
+      setError("PDF preservado no CRM. Sincronização com o Drive pendente: " + String(e?.message || e));
+    } finally {
+      setSyncingId(null);
+    }
+  }
+
   async function generate(preview: boolean) {
     if (busy) return;
     setBusy(true); setError(""); setFeedback("");
@@ -143,15 +159,17 @@ export default function CrmOfficialPdfActions(props: Props) {
       setFeedback("Documento salvo no histórico do CRM (arquivo #" + arquivado.id + ").");
       if (preview) {
         if (!tab) {
-          setError("Visualização bloqueada. O arquivo foi salvo no histórico; use Abrir ou Baixar.");
-          return;
+          setError("Pop-up bloqueado. Abra o PDF pelo histórico abaixo.");
+        } else {
+          const blobUrl = URL.createObjectURL(blob);
+          tab.location.href = blobUrl;
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
         }
-        const blobUrl = URL.createObjectURL(blob);
-        tab.location.href = blobUrl;
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
       } else {
         baixarDocumentoPdf(blob, fileName);
       }
+      // A cópia em Drive só começa depois da gravação segura no CRM.
+      await syncDrive(arquivado.id);
     } catch (e: any) {
       if (tab && !tab.closed) tab.close();
       setError(String(e?.message || e || "Falha ao salvar PDF no CRM."));
@@ -259,8 +277,13 @@ export default function CrmOfficialPdfActions(props: Props) {
         </div>
         <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, true)}>Abrir</button>
         <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, false)}>Baixar</button>
-        {arquivo.drive_url && <a href={arquivo.drive_url} target="_blank" rel="noopener noreferrer"
-          style={{ color: "#dac6ff" }}>Ver no Drive</a>}
+        {arquivo.drive_url
+          ? <a href={arquivo.drive_url} target="_blank" rel="noopener noreferrer"
+              style={{ color: "#dac6ff" }}>Ver no Drive</a>
+          : <button type="button" style={{ ...button, background: "#25203d" }}
+              disabled={busy || syncingId !== null} onClick={() => void syncDrive(arquivo.id)}>
+              {syncingId === arquivo.id ? "Sincronizando..." : "Sincronizar Drive"}
+            </button>}
       </div>)}
     </div>
   </div>;
