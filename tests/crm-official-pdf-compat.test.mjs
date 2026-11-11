@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as pdfLib from "pdf-lib";
 import { renderizarPdfOficial } from "../src/shared/crmOfficialTemplates.js";
 
@@ -61,8 +61,8 @@ async function check(kind, data, expectedMinimumPages) {
   // Conferência adicional usando o leitor da biblioteca, independente do pdfinfo.
   const revisado = await pdfLib.PDFDocument.load(output);
   assert.equal(revisado.getPageCount(), count);
-  assert.ok(revisado.getForm().getFields().every(field => field.isReadOnly()),
-    kind + ": campos do PDF devem ficar protegidos contra alterações casuais");
+  assert.equal(revisado.getForm().getFields().length, 0,
+    kind + ": o PDF final não deve conter campos AcroForm editáveis");
   console.log(kind + ": PDF íntegro e legível, " + count + " páginas, " + output.length + " bytes.");
 }
 
