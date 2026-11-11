@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as pdfLib from "pdf-lib";
 import { renderizarPdfOficial } from "../src/shared/crmOfficialTemplates.js";
 
@@ -42,16 +42,27 @@ async function check(kind, data, expectedMinimumPages) {
   assert.match(tail, /startxref\n\d+\n%%EOF/, kind + ": sem referência da tabela xref");
   const savedPath = join(dir, kind + ".pdf");
   writeFileSync(savedPath, output);
-  const info = execFileSync("pdfinfo", [savedPath], { encoding: "utf8", timeout: 30000 });
+  const infoResult = spawnSync("pdfinfo", [savedPath], { encoding: "utf8", timeout: 30000 });
+  assert.equal(infoResult.status, 0, kind + ": pdfinfo falhou: " + infoResult.stderr);
+  assert.doesNotMatch(infoResult.stderr || "", /Internal Error|xref|syntax error|reconstruct|couldn.t read/i,
+    kind + ": há referências internas inválidas no arquivo PDF");
+  const info = infoResult.stdout;
   const count = Number(info.match(/Pages:\s+(\d+)/)?.[1]);
   assert.ok(count >= expectedMinimumPages, kind + ": PDF inválido ou páginas ausentes: " + info);
-  const text = execFileSync("pdftotext", ["-layout", savedPath, "-"], { encoding: "utf8", timeout: 30000 });
+  const textResult = spawnSync("pdftotext", ["-layout", savedPath, "-"], { encoding: "utf8", timeout: 30000 });
+  assert.equal(textResult.status, 0, kind + ": pdftotext falhou: " + textResult.stderr);
+  assert.doesNotMatch(textResult.stderr || "", /Internal Error|xref|syntax error|reconstruct|couldn.t read/i,
+    kind + ": erros estruturais ao extrair o texto do PDF");
+  const text = textResult.stdout;
   assert.match(text, /DUBWORKS/i, kind + ": logo/título do modelo ausente");
   assert.match(text, /Cliente Teste/, kind + ": cliente não renderizado");
   if (kind === "proposta") assert.match(text, /690,00/, "valor da proposta negociado ausente");
   if (kind === "contrato") assert.match(text, /PRESTADORA/, "cláusulas do contrato ausentes");
   // Conferência adicional usando o leitor da biblioteca, independente do pdfinfo.
-  assert.equal((await pdfLib.PDFDocument.load(output)).getPageCount(), count);
+  const revisado = await pdfLib.PDFDocument.load(output);
+  assert.equal(revisado.getPageCount(), count);
+  assert.ok(revisado.getForm().getFields().every(field => field.isReadOnly()),
+    kind + ": campos do PDF devem ficar protegidos contra alterações casuais");
   console.log(kind + ": PDF íntegro e legível, " + count + " páginas, " + output.length + " bytes.");
 }
 
