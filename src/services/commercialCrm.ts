@@ -172,6 +172,27 @@ export async function listarDocumentosCrm(tipo: TipoDocumentoCrm, id: number): P
   return (data || []) as DocumentoGeradoCrm[];
 }
 
+export async function sincronizarDocumentoDriveCrm(documentoId: number): Promise<{drive_url: string; drive_file_id: string}> {
+  const { data, error } = await supabase.functions.invoke("crm-drive-archive", {
+    body: { documentId: documentoId },
+  });
+  if (error) {
+    let mensagem = String(error.message || "Falha na conexão com o Google Drive.");
+    const response = (error as any).context;
+    if (response && typeof response.json === "function") {
+      try {
+        const payload = await response.json();
+        if (payload?.error) mensagem = String(payload.error);
+      } catch { /* keep generic error */ }
+    }
+    throw new Error(mensagem);
+  }
+  if (!data?.ok || !data?.drive_url || !data?.drive_file_id) {
+    throw new Error(String(data?.error || "O Drive não confirmou o arquivo."));
+  }
+  return { drive_url: String(data.drive_url), drive_file_id: String(data.drive_file_id) };
+}
+
 export async function baixarDocumentoArquivadoCrm(documentoId: number): Promise<Blob> {
   const { data, error } = await supabase.from("crm_documentos_gerados")
     .select("conteudo_base64").eq("id", documentoId).single();
