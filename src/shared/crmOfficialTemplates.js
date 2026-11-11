@@ -294,7 +294,7 @@ export async function renderizarPdfOficial(kind, data, templateBytes, lib) {
   // documento novo, e os valores são impressos por cima nos retângulos oficiais.
   // Isso resulta num PDF não editável, sem widgets ou refs órfãs do formulário.
   const pdf = await lib.PDFDocument.create();
-  const embutidas = await pdf.embedPdf(templateBytes);
+  const embutidas = await pdf.embedPdf(templateBytes, Array.from({ length: paginasModelo }, (_, i) => i));
   for (const folha of embutidas) {
     const pagina = pdf.addPage([folha.width, folha.height]);
     pagina.drawPage(folha, { x: 0, y: 0, width: folha.width, height: folha.height });
