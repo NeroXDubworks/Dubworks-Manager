@@ -114,9 +114,9 @@ export default function CrmContractPreview({
         A minuta gerada pelo sistema contém apenas os dados já cadastrados e indica as informações faltantes.
         Não é um contrato final: precisa de cláusulas completas, conferência das partes e revisão humana/jurídica antes do envio ou assinatura.
       </div>
-      <CrmOfficialPdfActions kind="contrato" contrato={contrato} cliente={cliente}
-        negociacao={negociacao} parceria={parceria} propostaAceita={propostaAceita} />
     </>}
+    <CrmOfficialPdfActions key={contrato.id} kind="contrato" contrato={contrato} cliente={cliente}
+      negociacao={negociacao} parceria={parceria} propostaAceita={propostaAceita} />
     <div style={{ ...pequeno, fontSize: 12 }}>
       Fluxo de aprovação: rascunho → revisão → aprovação da diretoria → envio → assinatura → arquivamento.
       O sistema não considera o contrato assinado automaticamente.
