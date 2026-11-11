@@ -5,6 +5,8 @@ import CrmOfficialPdfActions from "./CrmOfficialPdfActions";
 export type ContratoCrmBasico = {
   id: number;
   versao: number;
+  proposta_id?: number | null;
+  campos_pdf?: Record<string, string>;
   titulo: string;
   objeto_escopo: string | null;
   tipo_modelo: string;
@@ -54,6 +56,7 @@ export default function CrmContractPreview({
   propostaAceita?: CrmProposta | null;
 }) {
   const preliminar = ["rascunho", "em_revisao"].includes(contrato.status);
+  const remunerado = ["servico_remunerado", "parceria_remunerada"].includes(contrato.tipo_modelo);
   const possuiDocumento = urlValida(contrato.arquivo_url);
   const nomeContraparte = cliente?.nome || parceria?.nome_parceiro || "Contraparte não informada";
   const escopo = contrato.objeto_escopo || negociacao?.escopo || parceria?.escopo || "";
@@ -80,6 +83,10 @@ export default function CrmContractPreview({
         <strong>{contexto}</strong>
       </div>
     </div>
+    {remunerado && <div style={{ color: propostaAceita ? "#c4f7db" : "#fde68a", fontSize: 13 }}>
+      {propostaAceita ? `Proposta aceita vinculada: #${propostaAceita.id} · v${propostaAceita.versao} · ${propostaAceita.titulo}`
+        : "Este contrato ainda precisa de uma proposta aceita vinculada."}
+    </div>}
     <div>
       <strong>Objeto / escopo do contrato</strong>
       <p style={{ whiteSpace: "pre-wrap", margin: "7px 0 0", color: "#d7ddeb" }}>
