@@ -275,7 +275,11 @@ export async function renderizarPdfOficial(kind, data, templateBytes, lib) {
   for (const [name, value] of Object.entries(fields)) fit(form, name, value, limits, appendix);
   const font = await pdf.embedFont(lib.StandardFonts.Helvetica);
   form.updateFieldAppearances(font);
-  form.flatten({ updateFieldAppearances: false });
+  // pdf-lib 1.17.1 pode deixar refs xref órfãs ao aplicar flatten()
+  // em AcroForms existentes. O Edge rejeita a exportação (0 páginas).
+  // Manter os campos preenchidos como somente leitura evita corromper a
+  // estrutura e preserva a aparência original do modelo.
+  for (const campo of form.getFields()) campo.enableReadOnly();
   if (kind === "proposta" && !["aprovada", "enviada", "aceita"].includes(data.proposta.status)) {
     await identifyDraft(pdf, lib, "RASCUNHO - AGUARDANDO APROVAÇÃO");
   }
