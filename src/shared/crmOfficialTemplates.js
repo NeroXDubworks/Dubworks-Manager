@@ -62,8 +62,7 @@ async function templateDoc(kind) {
   if (!response.ok) throw new Error("Modelo oficial de " + kind + " não encontrado na implantação (" + response.status + ").");
   const bytes = await response.arrayBuffer();
   if (bytes.byteLength < 20000) throw new Error("O arquivo do modelo oficial está incompleto.");
-  const pdf = await lib.PDFDocument.load(bytes);
-  return { pdf, lib, form: pdf.getForm() };
+  return { bytes, lib };
 }
 
 function fit(form, key, raw, limits, appendix) {
@@ -258,12 +257,22 @@ export function camposContratoOficial({ contrato, cliente = null, negociacao = n
   return { fields, appendix: [] };
 }
 
-async function compose(kind, data) {
-  const { pdf, lib, form } = await templateDoc(kind);
+/**
+ * Exporta o mesmo PDF na web e nos testes de compatibilidade.
+ * A tabela de referências PDF tradicional evita o problema de leitores
+ * (Edge/Acrobat) rejeitarem arquivos serializados com object streams.
+ */
+export async function renderizarPdfOficial(kind, data, templateBytes, lib) {
+  if (!["proposta", "contrato"].includes(kind)) throw new Error("Modelo de PDF desconhecido.");
+  const pdf = await lib.PDFDocument.load(templateBytes);
+  const paginasModelo = kind === "proposta" ? 3 : 9;
+  if (pdf.getPageCount() !== paginasModelo) {
+    throw new Error("Modelo oficial incompatível: número de páginas inesperado.");
+  }
+  const form = pdf.getForm();
   const { fields, appendix } = kind === "proposta" ? camposPropostaOficial(data) : camposContratoOficial(data);
   const limits = kind === "proposta" ? PROPOSAL_LIMITS : CONTRACT_LIMITS;
   for (const [name, value] of Object.entries(fields)) fit(form, name, value, limits, appendix);
-  // O PDF fica não editável para que a versão enviada tenha uma apresentação estável.
   const font = await pdf.embedFont(lib.StandardFonts.Helvetica);
   form.updateFieldAppearances(font);
   form.flatten({ updateFieldAppearances: false });
@@ -273,8 +282,24 @@ async function compose(kind, data) {
   await addAppendix(pdf, lib, appendix);
   pdf.setTitle(kind === "proposta" ? "DubWorks - Proposta comercial" : "DubWorks - Minuta de contrato");
   pdf.setAuthor("DubWorks");
-  const bytes = await pdf.save();
+
+  // pdf-lib, por padrão, usa object streams. Alguns PDFs preenchidos assim
+  // abrem no Drive, mas são rejeitados por leitores locais como Edge.
+  const bytes = await pdf.save({ useObjectStreams: false, updateFieldAppearances: false, addDefaultPage: false });
+  if (bytes.byteLength < 20000 || bytes[0] !== 37 || bytes[1] !== 80 || bytes[2] !== 68 || bytes[3] !== 70) {
+    throw new Error("Falha na exportação: o arquivo PDF ficou incompleto.");
+  }
+  // Não disponibilizar downloads que nem mesmo o parser consegue ler.
+  const conferencia = await lib.PDFDocument.load(bytes);
+  if (conferencia.getPageCount() < paginasModelo) {
+    throw new Error("Falha na exportação: páginas do PDF ausentes. Nenhum arquivo foi baixado.");
+  }
   return new Blob([bytes], { type: "application/pdf" });
+}
+
+async function compose(kind, data) {
+  const { bytes, lib } = await templateDoc(kind);
+  return renderizarPdfOficial(kind, data, bytes, lib);
 }
 
 export async function pdfPropostaOficial(data) { return compose("proposta", data); }
