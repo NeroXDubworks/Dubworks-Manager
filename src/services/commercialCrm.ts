@@ -45,6 +45,7 @@ export type CrmProposta = {
   justificativa_valor: string | null;
   condicoes_pagamento: string | null;
   validade_em: string | null;
+  campos_pdf: Record<string, string>;
   status: string;
   criado_em: string;
 };
@@ -57,6 +58,132 @@ export type CrmPropostaItem = {
   quantidade: number;
   preco_unitario: number;
 };
+
+/** Campos que existem nos modelos oficiais: ignorar chaves inesperadas do cliente. */
+const CHAVES_PDF_PROPOSTA = new Set([
+  "etapa_1","etapa_2","etapa_3","entregaveis","revisoes",
+  "inicio","entrega","contato","responsavel",
+]);
+const CHAVES_PDF_CONTRATO = new Set([
+  "prestadora_razao","prestadora_documento","prestadora_endereco",
+  "prestadora_representante","prestadora_email","cliente_endereco",
+  "cliente_representante","cliente_email","anexo_responsavel",
+  "anexo_entregas","anexo_etapas","anexo_parcelas","anexo_despesas",
+  "anexo_pagamento","anexo_revisoes","anexo_direitos","anexo_creditos",
+  "anexo_observacoes",
+]);
+export type TipoDocumentoCrm = "proposta" | "contrato";
+export type DocumentoGeradoCrm = {
+  id: number;
+  tipo: TipoDocumentoCrm;
+  proposta_id: number | null;
+  contrato_id: number | null;
+  nome_arquivo: string;
+  criado_em: string;
+  drive_url: string | null;
+  drive_file_id: string | null;
+  sha256: string | null;
+};
+
+export async function salvarCamposPdfCrm(
+  tipo: TipoDocumentoCrm, id: number, status: string, campos: Record<string, string>
+): Promise<Record<string, string>> {
+  if (!["rascunho","em_revisao"].includes(status)) {
+    throw new Error("Campos comerciais já aprovados são imutáveis. Crie uma nova versão.");
+  }
+  const allowed = tipo === "proposta" ? CHAVES_PDF_PROPOSTA : CHAVES_PDF_CONTRATO;
+  const limpos: Record<string, string> = {};
+  for (const [chave, raw] of Object.entries(campos)) {
+    if (!allowed.has(chave)) continue;
+    const valor = String(raw ?? "").trim();
+    if (valor.length > 6000) throw new Error("Campo " + chave + " ultrapassa 6.000 caracteres.");
+    if (valor) limpos[chave] = valor;
+  }
+  const table = tipo === "proposta" ? "crm_propostas" : "crm_contratos";
+  const { data, error } = await supabase.from(table)
+    .update({ campos_pdf: limpos }).eq("id", id)
+    .eq("status", status).select("campos_pdf").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("A versão/status mudou; reabra o documento para editar.");
+  return (data.campos_pdf || {}) as Record<string, string>;
+}
+
+export async function vincularContratoPropostaCrm(
+  contratoId: number, propostaId: number, statusAtual: string
+) {
+  if (!["rascunho","em_revisao"].includes(statusAtual)) {
+    throw new Error("Contrato já aprovado: vínculo não pode ser alterado.");
+  }
+  const { data, error } = await supabase.from("crm_contratos")
+    .update({ proposta_id: propostaId })
+    .eq("id", contratoId).eq("status", statusAtual)
+    .select("id,proposta_id").maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Contrato alterado por outra pessoa. Atualize a negociação.");
+  return data;
+}
+
+function arrayBufferBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let texto = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    texto += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(texto);
+}
+
+export async function arquivarPdfCrm(params: {
+  tipo: TipoDocumentoCrm; id: number; blob: Blob; nomeArquivo: string;
+  campos: Record<string, string>;
+}): Promise<DocumentoGeradoCrm> {
+  if (params.blob.type !== "application/pdf") {
+    throw new Error("Apenas PDF oficial pode ser arquivado.");
+  }
+  const buffer = await params.blob.arrayBuffer();
+  if (buffer.byteLength < 20000 || buffer.byteLength > 2900000) {
+    throw new Error("Tamanho inválido do PDF para armazenamento no CRM.");
+  }
+  const raw = new Uint8Array(buffer);
+  if (new TextDecoder().decode(raw.slice(0, 5)) !== "%PDF-") {
+    throw new Error("Arquivo gerado não é um PDF íntegro.");
+  }
+  const hash = await crypto.subtle.digest("SHA-256", buffer);
+  const sha256 = Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, "0")).join("");
+  const { data, error } = await supabase.from("crm_documentos_gerados").insert({
+    tipo: params.tipo,
+    proposta_id: params.tipo === "proposta" ? params.id : null,
+    contrato_id: params.tipo === "contrato" ? params.id : null,
+    nome_arquivo: params.nomeArquivo,
+    conteudo_base64: arrayBufferBase64(buffer),
+    sha256,
+    campos_snapshot: params.campos,
+  }).select("id,tipo,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256").single();
+  if (error) throw error;
+  return data as DocumentoGeradoCrm;
+}
+
+export async function listarDocumentosCrm(tipo: TipoDocumentoCrm, id: number): Promise<DocumentoGeradoCrm[]> {
+  const col = tipo === "proposta" ? "proposta_id" : "contrato_id";
+  const { data, error } = await supabase.from("crm_documentos_gerados")
+    .select("id,tipo,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256")
+    .eq(col, id).order("id", { ascending: false }).limit(70);
+  if (error) throw error;
+  return (data || []) as DocumentoGeradoCrm[];
+}
+
+export async function baixarDocumentoArquivadoCrm(documentoId: number): Promise<Blob> {
+  const { data, error } = await supabase.from("crm_documentos_gerados")
+    .select("conteudo_base64").eq("id", documentoId).single();
+  if (error) throw error;
+  const b64 = String(data?.conteudo_base64 || "");
+  if (!b64.startsWith("JVBERi0x")) throw new Error("Arquivo PDF arquivado inválido.");
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
 export type ParceriaGratuita = {
   id: number;
   nome_parceiro: string;
@@ -218,11 +345,18 @@ export async function listarContratosCrm(negociacaoId: number) {
 
 export async function criarRascunhoContratoCrm(params: {
   negociacaoId?: number; parceriaGratuitaId?: number;
+  propostaId?: number;
   titulo: string; objetoEscopo: string;
   tipoModelo: "servico_gratuito" | "servico_remunerado" | "parceria_gratuita" | "parceria_remunerada";
 }) {
   if (Boolean(params.negociacaoId) === Boolean(params.parceriaGratuitaId)) {
     throw new Error("Informe uma negociação remunerada ou uma parceria gratuita.");
+  }
+  if (params.negociacaoId && !params.propostaId) {
+    throw new Error("Escolha uma proposta aceita antes de criar o contrato remunerado.");
+  }
+  if (params.parceriaGratuitaId && params.propostaId) {
+    throw new Error("Parceria gratuita não deve ter proposta remunerada.");
   }
   const chave = params.negociacaoId ? "negociacao_id" : "parceria_gratuita_id";
   const contraparteId = params.negociacaoId || params.parceriaGratuitaId;
@@ -234,6 +368,7 @@ export async function criarRascunhoContratoCrm(params: {
   const { data, error } = await supabase.from("crm_contratos").insert({
     negociacao_id: params.negociacaoId ?? null,
     parceria_gratuita_id: params.parceriaGratuitaId ?? null,
+    proposta_id: params.propostaId ?? null,
     versao,
     titulo: params.titulo.trim(),
     objeto_escopo: params.objetoEscopo.trim() || null,

@@ -5,7 +5,7 @@ import {
   criarPropostaCrm, criarRascunhoContratoCrm, criarServicoCrm,
   listarClientesCrm, listarContatosCrm, listarContratosCrm,
   listarContratosParceriaGratuita, listarNegociacoesCrm, listarParceriasGratuitas,
-  listarPropostasCrm, listarServicosCrm, registrarContratoAssinado,
+  listarPropostasCrm, listarServicosCrm, registrarContratoAssinado, vincularContratoPropostaCrm,
   type CrmCliente, type CrmContato, type CrmNegociacao, type CrmProposta,
   type CrmServico, type ParceriaGratuita,
 } from "../services/commercialCrm";
@@ -34,16 +34,19 @@ function dinheiro(v: number) { return v.toLocaleString("pt-BR", { style: "curren
 function vDinheiro(v: string) { const raw = v.trim(); return Number(raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw); }
 function erroAmigavel(e: any) { return String(e?.message || e || "Erro desconhecido"); }
 
-function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociacao, parceria, propostaAceita }: {
+function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociacao, parceria, propostasAceitas = [] }: {
   contrato: any;
   diretor: boolean;
   recarregar: () => Promise<void>;
   cliente?: CrmCliente | null;
   negociacao?: CrmNegociacao | null;
   parceria?: ParceriaGratuita | null;
-  propostaAceita?: CrmProposta | null;
+  propostasAceitas?: CrmProposta[];
 }) {
   const [aberto, setAberto] = useState(false);
+  const [selecaoProposta, setSelecaoProposta] = useState<number>(Number(contrato.proposta_id || 0));
+  const propostaAceita = propostasAceitas.find(p => p.id === Number(contrato.proposta_id)) || null;
+  const remunerado = Boolean(negociacao);
   const [url, setUrl] = useState(String(contrato.arquivo_url || ""));
   const [dataAssinatura, setDataAssinatura] = useState(new Date().toISOString().slice(0, 10));
   const [ocupado, setOcupado] = useState(false);
@@ -66,6 +69,27 @@ function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociac
       aria-controls={"dw-contrato-detalhe-" + contrato.id} onClick={() => setAberto(v => !v)}>
       {aberto ? "Fechar detalhes do contrato" : "Abrir contrato / Visualizar"}
     </button>
+    {remunerado && <>
+      <div style={{ fontSize: 12, color: propostaAceita ? "#a7f3d0" : "#fde68a" }}>
+        {propostaAceita ? `Vinculado à proposta aceita #${propostaAceita.id}, versão ${propostaAceita.versao}`
+          : "Nenhuma proposta aceita vinculada. Escolha uma antes de enviar para revisão."}
+      </div>
+      {["rascunho","em_revisao"].includes(contrato.status) && !propostaAceita &&
+        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+          <select style={{ ...campo, flex: 1, minWidth: 170 }} value={selecaoProposta}
+            aria-label="Proposta aceita específica deste contrato"
+            onChange={e => setSelecaoProposta(Number(e.target.value))}>
+            <option value={0}>Selecione proposta aceita</option>
+            {propostasAceitas.map(p => <option key={p.id} value={p.id}>
+              #{p.id} · v{p.versao} · {dinheiro(Number(p.valor_negociado))}
+            </option>)}
+          </select>
+          <button type="button" style={botao} disabled={ocupado || !selecaoProposta}
+            onClick={() => void executarLocal(() => vincularContratoPropostaCrm(contrato.id, selecaoProposta, contrato.status))}>
+            Vincular proposta
+          </button>
+        </div>}
+    </>}
     {aberto && <CrmContractPreview contrato={contrato} cliente={cliente} negociacao={negociacao}
       parceria={parceria} propostaAceita={propostaAceita} />}
     {contrato.arquivo_url && <a href={contrato.arquivo_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir documento ↗</a>}
@@ -82,7 +106,7 @@ function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociac
       </p>
     )}
     {proxima && (proxima !== "aprovado" || diretor) && <button type="button"
-      style={{ ...botao, justifySelf: "start" }} disabled={ocupado || (proxima === "aprovado" && !documentoAnexado)}
+      style={{ ...botao, justifySelf: "start" }} disabled={ocupado || (remunerado && !propostaAceita) || (proxima === "aprovado" && !documentoAnexado)}
       onClick={() => void executarLocal(() => alterarStatusContratoCrm(contrato.id, contrato.status, proxima))}>
       {proxima === "em_revisao" ? "Enviar à revisão" : proxima === "aprovado" ? "Aprovar como diretoria" : proxima === "enviado" ? "Marcar como enviado" : "Aguardar assinatura"}
     </button>}
@@ -114,6 +138,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
   const [negociacaoId, setNegociacaoId] = useState<number | null>(null);
   const [propostas, setPropostas] = useState<CrmProposta[]>([]);
   const [propostaAbertaId, setPropostaAbertaId] = useState<number | null>(null);
+  const [propostaContratoId, setPropostaContratoId] = useState<number>(0);
   const [contratos, setContratos] = useState<any[]>([]);
   const [parcerias, setParcerias] = useState<ParceriaGratuita[]>([]);
   const [parceriaId, setParceriaId] = useState<number | null>(null);
@@ -161,6 +186,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
   }, [clienteId]);
   useEffect(() => {
     let ativo = true;
+    setPropostaContratoId(0);
     if (!negociacaoId) { setPropostas([]); setContratos([]); return; }
     Promise.all([listarPropostasCrm(negociacaoId), listarContratosCrm(negociacaoId)])
       .then(([pr, co]) => { if (ativo) { setPropostas(pr); setContratos(co); } })
@@ -328,13 +354,29 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                     <p style={{ ...small, margin: 0 }}>{negociacao.escopo || "Escopo ainda não descrito."}</p>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       <button type="button" style={botao} onClick={() => { setMostrarProposta(v => !v); setItens([]); setFormProposta({ titulo: "Proposta — " + negociacao.titulo, escopo: negociacao.escopo || "", totalPersonalizado: "", custoInterno: "", justificativa: "" }); }}>+ Elaborar proposta</button>
-                      <button type="button" style={botao} disabled={ocupado} onClick={() => void executar(async () => {
-                        await criarRascunhoContratoCrm({
-                          negociacaoId: negociacao.id, titulo: "Contrato — " + negociacao.titulo,
-                          objetoEscopo: negociacao.escopo || "",
-                          tipoModelo: negociacao.natureza === "parceria" ? "parceria_remunerada" : "servico_remunerado",
-                        });
-                      }, async () => setContratos(await listarContratosCrm(negociacao.id)))}>+ Elaborar contrato (rascunho)</button>
+                      <label style={{ ...small, display: "grid", gap: 4, minWidth: 210 }}>
+                        Proposta aceita para o contrato
+                        <select style={campo} value={propostaContratoId}
+                          onChange={e => setPropostaContratoId(Number(e.target.value))}>
+                          <option value={0}>Selecione uma versão aceita</option>
+                          {propostas.filter(p => p.status === "aceita").map(p =>
+                            <option key={p.id} value={p.id}>
+                              #{p.id} · v{p.versao} · {dinheiro(Number(p.valor_negociado))}
+                            </option>)}
+                        </select>
+                      </label>
+                      <button type="button" style={botao} disabled={ocupado || !propostaContratoId}
+                        onClick={() => void executar(async () => {
+                          await criarRascunhoContratoCrm({
+                            negociacaoId: negociacao.id, propostaId: propostaContratoId,
+                            titulo: "Contrato — " + negociacao.titulo,
+                            objetoEscopo: negociacao.escopo || "",
+                            tipoModelo: negociacao.natureza === "parceria" ? "parceria_remunerada" : "servico_remunerado",
+                          });
+                          setPropostaContratoId(0);
+                        }, async () => setContratos(await listarContratosCrm(negociacao.id)))}>
+                        + Elaborar contrato (rascunho)
+                      </button>
                     </div>
                     {mostrarProposta && (
                       <form onSubmit={e => {
@@ -430,7 +472,7 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                     <strong>Contratos ({contratos.length})</strong>
                     {contratos.map(c => <ContractWorkflowCard key={c.id} contrato={c} diretor={podeAprovar}
                       cliente={cliente} negociacao={negociacao}
-                      propostaAceita={propostas.find(p => p.status === "aceita") || null}
+                      propostasAceitas={propostas.filter(p => p.status === "aceita")}
                       recarregar={async () => setContratos(await listarContratosCrm(negociacao.id))} />)}
                     <span style={small}>Contratos são rascunhos até aprovação, revisão jurídica e arquivamento do documento efetivamente assinado.</span>
                   </div>
