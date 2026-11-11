@@ -60,10 +60,26 @@ async function google(token:string,endpoint:string,init:RequestInit={}) {
   });
   const data=await response.json().catch(()=>({}));
   if(!response.ok){
-    const permission=response.status===403||response.status===404;
-    throw new ApiError(permission?503:502,permission?"DRIVE_PERMISSION":"DRIVE_ERROR",
-      permission?"A conta de serviço não tem acesso de gravação à pasta comercial restrita.":
-      "Google Drive: "+str(data?.error?.message||response.statusText).slice(0,140));
+    const reason=str(data?.error?.errors?.[0]?.reason || data?.error?.status);
+    const detail=str(data?.error?.message || response.statusText).slice(0,190);
+    const uploadStep=endpoint.includes("/upload/drive/");
+    // Respostas 403 do Google têm causas diferentes. A pasta pode permitir
+    // criar subpastas, mas a conta de serviço não tem cota para subir PDFs
+    // no Meu Drive pessoal. Nunca instrua um novo compartilhamento nesse caso.
+    if(response.status===403 &&
+      (reason==="storageQuotaExceeded" || /service accounts do not have storage quota/i.test(detail))) {
+      throw new ApiError(503,"DRIVE_QUOTA",
+        "A conta de serviço não possui armazenamento para enviar PDFs ao Meu Drive pessoal. "+
+        "Não é falta de compartilhamento: é preciso autenticar a conta proprietária via OAuth "+
+        "ou usar um Drive compartilhado do Google Workspace. O PDF segue salvo no CRM.");
+    }
+    if(response.status===403 || response.status===404){
+      throw new ApiError(503,"DRIVE_PERMISSION",
+        "Google Drive recusou a operação "+(uploadStep?"de envio do PDF":"na pasta comercial")+
+        (reason?" ("+reason+")":"")+": "+detail);
+    }
+    throw new ApiError(response.status===429?429:502,"DRIVE_ERROR",
+      "Google Drive ("+response.status+(reason?", "+reason:"")+"): "+detail);
   }
   return data;
 }
@@ -193,10 +209,9 @@ Deno.serve(async(req:Request)=>{
   }catch(error){
     const err=error instanceof ApiError?error:null;
     if(!err)console.error("crm-drive-archive",error instanceof Error?error.name:"unknown");
-    const detail=err?.code==="DRIVE_PERMISSION"
-      ? " Compartilhe a pasta comercial restrita com permissão de gravação para: "+
-        (Deno.env.get("GOOGLE_CLIENT_EMAIL")||"conta de serviço configurada")
-      : "";
+    // Não acrescente instruções genéricas: a resposta do Google agora é
+    // classificada pelo motivo real (quota, permissão ou API).
+    const detail="";
     return json({ok:false,code:err?.code||"INTERNAL",
       error:(err?.message||"Falha inesperada. O arquivo permanece salvo no CRM.")+detail},err?.status||500);
   }
