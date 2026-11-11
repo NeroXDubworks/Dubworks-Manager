@@ -140,7 +140,7 @@ Deno.serve(async(req:Request)=>{
     const {data:{user},error:loginError}=await scoped.auth.getUser(auth);
     if(loginError||!user?.id)throw new ApiError(401,"AUTH","Sessão expirada.");
     const {data:doc,error:docError}=await scoped.from("crm_documentos_gerados")
-      .select("id,tipo,proposta_id,contrato_id,nome_arquivo,conteudo_base64,sha256,drive_file_id,drive_url")
+      .select("id,tipo,categoria,proposta_id,contrato_id,nome_arquivo,conteudo_base64,sha256,drive_file_id,drive_url")
       .eq("id",id).maybeSingle();
     if(docError||!doc)throw new ApiError(403,"PERMISSION","Documento comercial inacessível.");
     if(doc.drive_file_id&&doc.drive_url)
@@ -176,7 +176,8 @@ Deno.serve(async(req:Request)=>{
     const token=await googleToken();
     await validRoot(token);
     const client=await folder(token,ROOT,name);
-    const destination=await folder(token,client,doc.tipo==="proposta"?"Propostas":"Contratos");
+    const destination=await folder(token,client,
+      doc.categoria==="assinado"?"Documentos Assinados":doc.tipo==="proposta"?"Propostas":"Contratos");
     const filename="DW-"+doc.tipo+"-"+doc.id+"-"+sha.slice(0,12)+"-"+safe(doc.nome_arquivo).replace(/\.pdf$/i,"")+".pdf";
     const found=await lookup(token,destination,filename,"application/pdf");
     const fileId=found?.id?String(found.id):await upload(token,destination,filename,bytes);
