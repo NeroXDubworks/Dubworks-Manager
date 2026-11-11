@@ -1,8 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type {
   CrmCliente, CrmNegociacao, CrmProposta, CrmPropostaItem, ParceriaGratuita,
 } from "../services/commercialCrm";
 import type { ContratoCrmBasico } from "./CrmContractPreview";
+import {
+  salvarCamposPdfCrm, arquivarPdfCrm, listarDocumentosCrm, baixarDocumentoArquivadoCrm,
+  type DocumentoGeradoCrm,
+} from "../services/commercialCrm";
 import {
   pdfPropostaOficial, pdfContratoOficial, baixarDocumentoPdf,
   camposPropostaOficial, camposContratoOficial, nomePdfContrato, nomePdfProposta,
@@ -72,11 +76,32 @@ const criticalContractFields = [
 ];
 
 export default function CrmOfficialPdfActions(props: Props) {
-  const [extras, setExtras] = useState<PdfExtraFields>({});
+  const isProposal = props.kind === "proposta";
+  const entity = isProposal ? props.proposta : props.contrato;
+  const tipo = isProposal ? "proposta" : "contrato";
+  const [extras, setExtras] = useState<PdfExtraFields>({ ...(entity.campos_pdf || {}) });
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [historico, setHistorico] = useState<DocumentoGeradoCrm[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [open, setOpen] = useState(false);
-  const isProposal = props.kind === "proposta";
+  const isDraft = ["rascunho","em_revisao"].includes(entity.status);
+
+  useEffect(() => {
+    let active = true;
+    setExtras({ ...(entity.campos_pdf || {}) });
+    setDirty(false);
+    setLoadingHistory(true);
+    setError("");
+    setFeedback("");
+    listarDocumentosCrm(tipo, entity.id)
+      .then(lista => { if (active) setHistorico(lista); })
+      .catch(e => { if (active) setError("Histórico: " + String(e?.message || e)); })
+      .finally(() => { if (active) setLoadingHistory(false); });
+    return () => { active = false; };
+  }, [tipo, entity.id]);
   const fields = isProposal ? inputsProposta : inputsContrato;
   const incomplete = criticalContractFields.filter(k => !extras[k]?.trim());
   const data = { ...props, extras };
@@ -89,33 +114,67 @@ export default function CrmOfficialPdfActions(props: Props) {
   const filledCount = Object.values(auto).filter(v => Boolean(String(v).trim())).length;
   const totalCount = Object.keys(auto).length;
 
+  async function saveExtras() {
+    if (!isDraft || !dirty) return;
+    await salvarCamposPdfCrm(tipo, entity.id, entity.status, extras);
+    setDirty(false);
+    setFeedback("Informações complementares salvas no Supabase.");
+  }
+
   async function generate(preview: boolean) {
     if (busy) return;
-    setError("");
-    setBusy(true);
-    // Abre a aba ainda no clique do usuário, antes de qualquer await.
+    setBusy(true); setError(""); setFeedback("");
     const tab = preview ? window.open("", "_blank") : null;
     try {
       if (tab) { tab.opener = null; tab.document.title = "Preparando PDF oficial DubWorks"; }
+      if (dirty) await saveExtras();
       const blob = isProposal
         ? await pdfPropostaOficial(data as ProposalProps & { extras: PdfExtraFields })
         : await pdfContratoOficial(data as ContractProps & { extras: PdfExtraFields });
+      const fileName = isProposal
+        ? nomePdfProposta(data as ProposalProps & { extras: PdfExtraFields })
+        : nomePdfContrato(data as ContractProps & { extras: PdfExtraFields });
+      // Não entregar o documento como concluído sem antes preservá-lo.
+      const arquivado = await arquivarPdfCrm({
+        tipo, id: entity.id, blob, nomeArquivo: fileName, campos: extras,
+      });
+      setHistorico(prev => [arquivado, ...prev]);
+      setFeedback("Documento salvo no histórico do CRM (arquivo #" + arquivado.id + ").");
       if (preview) {
         if (!tab) {
-          setError("O navegador bloqueou a visualização. Permita pop-ups ou clique em Baixar PDF.");
+          setError("Visualização bloqueada. O arquivo foi salvo no histórico; use Abrir ou Baixar.");
           return;
         }
         const blobUrl = URL.createObjectURL(blob);
         tab.location.href = blobUrl;
         setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
       } else {
-        baixarDocumentoPdf(blob, isProposal
-          ? nomePdfProposta(data as ProposalProps & { extras: PdfExtraFields })
-          : nomePdfContrato(data as ContractProps & { extras: PdfExtraFields }));
+        baixarDocumentoPdf(blob, fileName);
       }
     } catch (e: any) {
       if (tab && !tab.closed) tab.close();
-      setError(String(e?.message || e || "Não foi possível preencher o PDF."));
+      setError(String(e?.message || e || "Falha ao salvar PDF no CRM."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function abrirArquivado(arquivo: DocumentoGeradoCrm, preview: boolean) {
+    if (busy) return;
+    setBusy(true); setError("");
+    const tab = preview ? window.open("", "_blank") : null;
+    try {
+      if (tab) tab.opener = null;
+      const blob = await baixarDocumentoArquivadoCrm(arquivo.id);
+      if (preview) {
+        if (!tab) { setError("Pop-up bloqueado; use Baixar."); return; }
+        const url = URL.createObjectURL(blob);
+        tab.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 120000);
+      } else baixarDocumentoPdf(blob, arquivo.nome_arquivo);
+    } catch (e: any) {
+      if (tab && !tab.closed) tab.close();
+      setError(String(e?.message || e));
     } finally {
       setBusy(false);
     }
@@ -162,11 +221,19 @@ export default function CrmOfficialPdfActions(props: Props) {
           <textarea rows={["anexo_entregas","anexo_etapas","anexo_direitos","anexo_creditos","anexo_observacoes"].includes(item.id) ? 3 : 1}
             style={{ ...editable, resize: "vertical" }}
             value={extras[item.id] || ""}
-            onChange={e => setExtras(current => ({ ...current, [item.id]: e.target.value }))}
+            disabled={!isDraft || busy}
+            onChange={e => { setExtras(current => ({ ...current, [item.id]: e.target.value })); setDirty(true); }}
             placeholder="Preencher somente se acordado" />
         </label>
       )}
     </div>}
+    {open && isDraft && <button type="button" disabled={busy || !dirty}
+      style={{ ...button, background: "#263a60", justifySelf: "start" }}
+      onClick={() => { setBusy(true); setError(""); setFeedback("");
+        void saveExtras().catch(e => setError(String(e?.message || e))).finally(() => setBusy(false)); }}>
+      {dirty ? "Salvar informações no CRM" : "Informações salvas"}
+    </button>}
+    {feedback && <div role="status" style={{ color: "#a7f3d0", fontSize: 13 }}>{feedback}</div>}
     {error && <div role="alert" style={{ color: "#fda4af", fontSize: 13 }}>{error}</div>}
     <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
       <button type="button" disabled={busy} style={button} onClick={() => void generate(true)}>
@@ -176,6 +243,22 @@ export default function CrmOfficialPdfActions(props: Props) {
         onClick={() => void generate(false)}>
         {busy ? "Preparando..." : isProposal ? "Baixar proposta oficial" : "Baixar contrato oficial (minuta)"}
       </button>
+    </div>
+    <div style={{ display: "grid", gap: 8, borderTop: "1px solid #403557", paddingTop: 12 }}>
+      <strong style={{ fontSize: 14 }}>Histórico de PDFs arquivados ({historico.length})</strong>
+      {loadingHistory && <div style={small}>Carregando arquivos anteriores...</div>}
+      {!loadingHistory && historico.length === 0 && <div style={small}>Nenhum PDF gerado nesta versão.</div>}
+      {historico.map(arquivo => <div key={arquivo.id}
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #403557", padding: "8px 0" }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 12, fontWeight: 650, overflowWrap: "anywhere" }}>#{arquivo.id} · {arquivo.nome_arquivo}</div>
+          <div style={small}>{new Date(arquivo.criado_em).toLocaleString("pt-BR")} · Arquivado no CRM</div>
+        </div>
+        <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, true)}>Abrir</button>
+        <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, false)}>Baixar</button>
+        {arquivo.drive_url && <a href={arquivo.drive_url} target="_blank" rel="noopener noreferrer"
+          style={{ color: "#dac6ff" }}>Ver no Drive</a>}
+      </div>)}
     </div>
   </div>;
 }
