@@ -3,8 +3,9 @@ import type {
   CrmCliente, CrmNegociacao, CrmProposta, CrmPropostaItem, ParceriaGratuita,
 } from "../services/commercialCrm";
 import type { ContratoCrmBasico } from "./CrmContractPreview";
+import { pendenciasProposta, pendenciasContrato } from "../shared/crmDocumentReadiness.js";
 import {
-  salvarCamposPdfCrm, arquivarPdfCrm, listarDocumentosCrm, baixarDocumentoArquivadoCrm,
+  salvarCamposPdfCrm, arquivarPdfCrm, listarDocumentosCrm, baixarDocumentoArquivadoCrm, sincronizarDocumentoDriveCrm,
   type DocumentoGeradoCrm,
 } from "../services/commercialCrm";
 import {
@@ -19,6 +20,7 @@ type ProposalProps = {
   cliente: CrmCliente;
   negociacao: CrmNegociacao;
   itens: CrmPropostaItem[];
+  onCamposSalvos?: () => Promise<void>;
 };
 type ContractProps = {
   kind: "contrato";
@@ -27,6 +29,7 @@ type ContractProps = {
   negociacao?: CrmNegociacao | null;
   parceria?: ParceriaGratuita | null;
   propostaAceita?: CrmProposta | null;
+  onCamposSalvos?: () => Promise<void>;
 };
 type Props = ProposalProps | ContractProps;
 const editable: React.CSSProperties = {
@@ -86,6 +89,8 @@ export default function CrmOfficialPdfActions(props: Props) {
   const [feedback, setFeedback] = useState("");
   const [historico, setHistorico] = useState<DocumentoGeradoCrm[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [signedFile, setSignedFile] = useState<File | null>(null);
   const [open, setOpen] = useState(false);
   const isDraft = ["rascunho","em_revisao"].includes(entity.status);
   const podeGerar = isProposal || isDraft;
@@ -106,6 +111,9 @@ export default function CrmOfficialPdfActions(props: Props) {
   const fields = isProposal ? inputsProposta : inputsContrato;
   const incomplete = criticalContractFields.filter(k => !extras[k]?.trim());
   const data = { ...props, extras };
+  const pendencias = isProposal
+    ? pendenciasProposta({ ...entity, campos_pdf: extras })
+    : pendenciasContrato({ ...entity, campos_pdf: extras });
   const auto = useMemo(() => {
     try {
       return isProposal ? camposPropostaOficial(data as ProposalProps & { extras: PdfExtraFields }).fields
@@ -119,7 +127,23 @@ export default function CrmOfficialPdfActions(props: Props) {
     if (!isDraft || !dirty) return;
     await salvarCamposPdfCrm(tipo, entity.id, entity.status, extras);
     setDirty(false);
+    if (props.onCamposSalvos) await props.onCamposSalvos();
     setFeedback("Informações complementares salvas no Supabase.");
+  }
+
+  async function syncDrive(arquivoId: number): Promise<void> {
+    setSyncingId(arquivoId);
+    try {
+      const resultado = await sincronizarDocumentoDriveCrm(arquivoId);
+      setHistorico(atual => atual.map(arquivo => arquivo.id === arquivoId
+        ? { ...arquivo, drive_url: resultado.drive_url, drive_file_id: resultado.drive_file_id }
+        : arquivo));
+      setFeedback("Documento arquivado no CRM e sincronizado com o Drive restrito.");
+    } catch (e: any) {
+      setError("PDF preservado no CRM. Sincronização com o Drive pendente: " + String(e?.message || e));
+    } finally {
+      setSyncingId(null);
+    }
   }
 
   async function generate(preview: boolean) {
@@ -143,15 +167,17 @@ export default function CrmOfficialPdfActions(props: Props) {
       setFeedback("Documento salvo no histórico do CRM (arquivo #" + arquivado.id + ").");
       if (preview) {
         if (!tab) {
-          setError("Visualização bloqueada. O arquivo foi salvo no histórico; use Abrir ou Baixar.");
-          return;
+          setError("Pop-up bloqueado. Abra o PDF pelo histórico abaixo.");
+        } else {
+          const blobUrl = URL.createObjectURL(blob);
+          tab.location.href = blobUrl;
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
         }
-        const blobUrl = URL.createObjectURL(blob);
-        tab.location.href = blobUrl;
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
       } else {
         baixarDocumentoPdf(blob, fileName);
       }
+      // A cópia em Drive só começa depois da gravação segura no CRM.
+      await syncDrive(arquivado.id);
     } catch (e: any) {
       if (tab && !tab.closed) tab.close();
       setError(String(e?.message || e || "Falha ao salvar PDF no CRM."));
@@ -181,6 +207,33 @@ export default function CrmOfficialPdfActions(props: Props) {
     }
   }
 
+  async function archiveSigned() {
+    if (isProposal || entity.status !== "assinado" || !signedFile || busy) return;
+    setBusy(true); setError(""); setFeedback("");
+    try {
+      if (!signedFile.name.toLowerCase().endsWith(".pdf")) {
+        throw new Error("Selecione um arquivo PDF assinado.");
+      }
+      const binary = signedFile.type === "application/pdf" ? signedFile
+        : new Blob([await signedFile.arrayBuffer()], { type: "application/pdf" });
+      const archive = await arquivarPdfCrm({
+        tipo: "contrato", id: entity.id, categoria: "assinado",
+        blob: binary,
+        nomeArquivo: "DubWorks-Contrato-Assinado-" + entity.id + "-" +
+          signedFile.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 85),
+        campos: {},
+      });
+      setHistorico(prev => [archive, ...prev]);
+      setFeedback("Contrato assinado preservado no histórico do CRM.");
+      setSignedFile(null);
+      await syncDrive(archive.id);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return <div style={{ display: "grid", gap: 12, padding: 13, borderRadius: 12,
     background: "#100e28", border: "1px solid #514078" }}>
     <div>
@@ -193,6 +246,14 @@ export default function CrmOfficialPdfActions(props: Props) {
           " Modelo de 9 páginas, com as cláusulas originais e o Anexo Único."}
       </p>
     </div>
+    {podeGerar && pendencias.length > 0 && <div role="status" style={{
+      padding: 10, borderRadius: 8, background: "#302719", color: "#fce4ab", fontSize: 12,
+    }}>
+      <strong>Antes da aprovação ou envio, complete ({pendencias.length}):</strong>
+      <ul style={{ margin: "7px 0 0", paddingLeft: 20 }}>
+        {pendencias.map(item => <li key={item}>{item}</li>)}
+      </ul>
+    </div>}
     {podeGerar && <div style={{ ...small, color: "#d8c4f4" }}>
       {filledCount} de {totalCount} campos do modelo disponíveis para preenchimento. Campos sem dados ficam em branco.
     </div>}
@@ -247,6 +308,23 @@ export default function CrmOfficialPdfActions(props: Props) {
     </div> : <p style={{ ...small, margin: 0 }}>
       Este contrato já saiu da fase de minuta. Reabra os arquivos anteriores abaixo e consulte o documento final anexado.
     </p>}
+    {!isProposal && entity.status === "assinado" && <div style={{
+      display: "grid", gap: 8, padding: 11, borderRadius: 10,
+      border: "1px solid #525f86", background: "#16213a",
+    }}>
+      <strong>Arquivar PDF efetivamente assinado</strong>
+      <p style={{ ...small, margin: 0 }}>
+        Selecione o documento final assinado. Ele será preservado no CRM e enviado à pasta
+        privada "Documentos Assinados" do Drive. O arquivo não altera o status do contrato.
+      </p>
+      <input type="file" accept="application/pdf,.pdf" disabled={busy}
+        aria-label="Arquivo do contrato assinado" style={{ ...editable, maxWidth: 420 }}
+        onChange={e => setSignedFile(e.target.files?.[0] || null)} />
+      <button type="button" disabled={busy || !signedFile} style={{ ...button, justifySelf: "start" }}
+        onClick={() => void archiveSigned()}>
+        {busy ? "Arquivando..." : "Arquivar contrato assinado"}
+      </button>
+    </div>}
     <div style={{ display: "grid", gap: 8, borderTop: "1px solid #403557", paddingTop: 12 }}>
       <strong style={{ fontSize: 14 }}>Histórico de PDFs arquivados ({historico.length})</strong>
       {loadingHistory && <div style={small}>Carregando arquivos anteriores...</div>}
@@ -254,13 +332,18 @@ export default function CrmOfficialPdfActions(props: Props) {
       {historico.map(arquivo => <div key={arquivo.id}
         style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #403557", padding: "8px 0" }}>
         <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ fontSize: 12, fontWeight: 650, overflowWrap: "anywhere" }}>#{arquivo.id} · {arquivo.nome_arquivo}</div>
+          <div style={{ fontSize: 12, fontWeight: 650, overflowWrap: "anywhere" }}>#{arquivo.id} · {arquivo.categoria === "assinado" ? "[ASSINADO] " : ""}{arquivo.nome_arquivo}</div>
           <div style={small}>{new Date(arquivo.criado_em).toLocaleString("pt-BR")} · Arquivado no CRM</div>
         </div>
         <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, true)}>Abrir</button>
         <button type="button" style={button} disabled={busy} onClick={() => void abrirArquivado(arquivo, false)}>Baixar</button>
-        {arquivo.drive_url && <a href={arquivo.drive_url} target="_blank" rel="noopener noreferrer"
-          style={{ color: "#dac6ff" }}>Ver no Drive</a>}
+        {arquivo.drive_url
+          ? <a href={arquivo.drive_url} target="_blank" rel="noopener noreferrer"
+              style={{ color: "#dac6ff" }}>Ver no Drive</a>
+          : <button type="button" style={{ ...button, background: "#25203d" }}
+              disabled={busy || syncingId !== null} onClick={() => void syncDrive(arquivo.id)}>
+              {syncingId === arquivo.id ? "Sincronizando..." : "Sincronizar Drive"}
+            </button>}
       </div>)}
     </div>
   </div>;

@@ -12,6 +12,8 @@ import {
 import { calculateProposal } from "../shared/crmPricing.js";
 import CrmProposalDetail from "./CrmProposalDetail";
 import CrmContractPreview from "./CrmContractPreview";
+import CrmLegacyContractsPanel from "./CrmLegacyContractsPanel";
+import { pendenciasProposta, pendenciasContrato } from "../shared/crmDocumentReadiness.js";
 
 type Tab = "comercial" | "parcerias" | "servicos";
 type ItemEdicao = { descricao: string; servico_id: number | null; unidade: string; quantidade: number; preco_unitario: number };
@@ -57,6 +59,7 @@ function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociac
   };
   const proxima = etapas[contrato.status];
   const documentoAnexado = /^https:\/\//i.test(String(contrato.arquivo_url || ""));
+  const pendencias = pendenciasContrato(contrato);
   async function executarLocal(acao: () => Promise<any>) {
     setOcupado(true); setErroLocal("");
     try { await acao(); await recarregar(); }
@@ -91,7 +94,7 @@ function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociac
         </div>}
     </>}
     {aberto && <CrmContractPreview contrato={contrato} cliente={cliente} negociacao={negociacao}
-      parceria={parceria} propostaAceita={propostaAceita} />}
+      parceria={parceria} propostaAceita={propostaAceita} onCamposSalvos={recarregar} />}
     {contrato.arquivo_url && <a href={contrato.arquivo_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir documento ↗</a>}
     {(contrato.status === "rascunho" || contrato.status === "em_revisao") && (
       <form onSubmit={e => { e.preventDefault(); void executarLocal(() => anexarDocumentoContratoCrm(contrato.id, url)); }} style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -105,8 +108,14 @@ function ContractWorkflowCard({ contrato, diretor, recarregar, cliente, negociac
         Para aprovar, anexe primeiro o link completo do documento revisado, começando por https://. Um endereço como www.site.com.br não é suficiente.
       </p>
     )}
+    {["aprovado","enviado"].includes(proxima || "") && pendencias.length > 0 &&
+      <div role="status" style={{ ...small, color: "#fde68a" }}>
+        Antes de aprovar ou enviar: {pendencias.join(" · ")}.
+      </div>}
     {proxima && (proxima !== "aprovado" || diretor) && <button type="button"
-      style={{ ...botao, justifySelf: "start" }} disabled={ocupado || (remunerado && !propostaAceita) || (proxima === "aprovado" && !documentoAnexado)}
+      style={{ ...botao, justifySelf: "start" }} disabled={ocupado || (remunerado && !propostaAceita) ||
+        (["aprovado","enviado"].includes(proxima) && pendencias.length > 0) ||
+        (proxima === "aprovado" && !documentoAnexado)}
       onClick={() => void executarLocal(() => alterarStatusContratoCrm(contrato.id, contrato.status, proxima))}>
       {proxima === "em_revisao" ? "Enviar à revisão" : proxima === "aprovado" ? "Aprovar como diretoria" : proxima === "enviado" ? "Marcar como enviado" : "Aguardar assinatura"}
     </button>}
@@ -253,6 +262,8 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
       {erro && <div role="alert" style={{ color: "#fecaca", padding: 12, border: "1px solid #7f1d1d", borderRadius: 10 }}>{erro}</div>}
       {sucesso && <div role="status" style={{ color: "#86efac", padding: 8 }}>{sucesso}</div>}
 
+      {aba === "comercial" && <CrmLegacyContractsPanel
+        onLinked={async id => { if (negociacaoId === id) setContratos(await listarContratosCrm(id)); }} />}
       {aba === "comercial" && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(230px,330px) minmax(0,1fr)", gap: 16 }} className="dw-crm-grid">
           <aside style={{ ...caixa, display: "grid", gap: 12, alignContent: "start" }}>
@@ -457,11 +468,21 @@ export default function CommercialCrmPanel({ responsavel, podeAprovar = false }:
                       {(() => {
                         const prox: Record<string,string> = { rascunho: "em_revisao", em_revisao: "aprovada", aprovada: "enviada", enviada: "aceita" };
                         const next = prox[p.status];
-                        return next && (next !== "aprovada" || podeAprovar) ? <button type="button" style={{ ...botao, marginLeft: 8 }}
-                          disabled={ocupado} onClick={() => void executar(
-                            () => alterarStatusPropostaCrm(p.id, p.status, next, responsavel),
-                            async () => setPropostas(await listarPropostasCrm(negociacao.id))
-                          )}>{next === "aprovada" ? "Aprovar proposta" : next === "em_revisao" ? "Enviar à revisão" : next === "enviada" ? "Marcar enviada" : "Registrar aceite"}</button> : null;
+                        const pendencias = pendenciasProposta(p);
+                        const bloqueada = ["aprovada","enviada"].includes(next || "") && pendencias.length > 0;
+                        return next && (next !== "aprovada" || podeAprovar) ? <>
+                          <button type="button" style={{ ...botao, marginLeft: 8 }}
+                            disabled={ocupado || bloqueada} onClick={() => void executar(
+                              () => alterarStatusPropostaCrm(p.id, p.status, next, responsavel),
+                              async () => setPropostas(await listarPropostasCrm(negociacao.id))
+                            )}>{next === "aprovada" ? "Aprovar proposta" : next === "em_revisao" ? "Enviar à revisão" : next === "enviada" ? "Marcar enviada" : "Registrar aceite"}</button>
+                          {bloqueada && <div role="status" style={{ color: "#fde68a", marginTop: 7 }}>
+                            Pendências para aprovação/envio: {pendencias.join(" · ")}.
+                          </div>}
+                          {next === "enviada" && !bloqueada && <div style={{ color: "#a7b6d2", marginTop: 7 }}>
+                            Gere e arquive o PDF aprovado antes de marcar o envio.
+                          </div>}
+                        </> : null;
                       })()}
                     </div>)}
                     {propostaAberta && cliente && negociacao && (

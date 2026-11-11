@@ -76,6 +76,7 @@ export type TipoDocumentoCrm = "proposta" | "contrato";
 export type DocumentoGeradoCrm = {
   id: number;
   tipo: TipoDocumentoCrm;
+  categoria: "gerado" | "assinado";
   proposta_id: number | null;
   contrato_id: number | null;
   nome_arquivo: string;
@@ -108,6 +109,56 @@ export async function salvarCamposPdfCrm(
   return (data.campos_pdf || {}) as Record<string, string>;
 }
 
+export type ContratoSemVinculoCrm = {
+  id: number;
+  titulo: string;
+  status: string;
+  negociacao_id: number;
+  negociacao_titulo: string;
+  cliente_nome: string;
+  propostas_aceitas: Array<{ id:number; versao:number; valor_negociado:number; titulo:string }>;
+};
+export async function listarContratosSemVinculoCrm(): Promise<ContratoSemVinculoCrm[]> {
+  const { data: contratos, error } = await supabase.from("crm_contratos")
+    .select("id,titulo,status,negociacao_id")
+    .is("proposta_id", null)
+    .not("negociacao_id", "is", null)
+    .in("status", ["rascunho", "em_revisao"])
+    .order("id", { ascending: true });
+  if (error) throw error;
+  if (!contratos?.length) return [];
+  const ids = [...new Set(contratos.map(c => Number(c.negociacao_id)))];
+  const [negResult, propostaResult] = await Promise.all([
+    supabase.from("crm_negociacoes").select("id,titulo,cliente_id").in("id", ids),
+    supabase.from("crm_propostas").select("id,titulo,versao,valor_negociado,negociacao_id")
+      .in("negociacao_id", ids).eq("status", "aceita"),
+  ]);
+  if (negResult.error) throw negResult.error;
+  if (propostaResult.error) throw propostaResult.error;
+  const negociacoes = negResult.data || [];
+  const clientIds = [...new Set(negociacoes.map(n => Number(n.cliente_id)))];
+  const clients = clientIds.length
+    ? await supabase.from("crm_clientes").select("id,nome").in("id", clientIds)
+    : { data:[], error:null };
+  if (clients.error) throw clients.error;
+  return contratos.map(contrato => {
+    const negociacao = negociacoes.find(n => Number(n.id) === Number(contrato.negociacao_id));
+    const cliente = (clients.data || []).find(c => Number(c.id) === Number(negociacao?.cliente_id));
+    const aceitas = (propostaResult.data || [])
+      .filter(p => Number(p.negociacao_id) === Number(contrato.negociacao_id))
+      .sort((a,b) => Number(b.versao)-Number(a.versao));
+    return {
+      id:Number(contrato.id), titulo:String(contrato.titulo),
+      status:String(contrato.status), negociacao_id:Number(contrato.negociacao_id),
+      negociacao_titulo:String(negociacao?.titulo || "Negociação sem nome"),
+      cliente_nome:String(cliente?.nome || "Cliente não localizado"),
+      propostas_aceitas:aceitas.map(p => ({
+        id:Number(p.id),versao:Number(p.versao),valor_negociado:Number(p.valor_negociado),titulo:String(p.titulo),
+      })),
+    };
+  });
+}
+
 export async function vincularContratoPropostaCrm(
   contratoId: number, propostaId: number, statusAtual: string
 ) {
@@ -136,7 +187,11 @@ function arrayBufferBase64(buffer: ArrayBuffer): string {
 export async function arquivarPdfCrm(params: {
   tipo: TipoDocumentoCrm; id: number; blob: Blob; nomeArquivo: string;
   campos: Record<string, string>;
+  categoria?: "gerado" | "assinado";
 }): Promise<DocumentoGeradoCrm> {
+  if (params.categoria === "assinado" && params.tipo !== "contrato") {
+    throw new Error("Somente contratos podem ter categoria assinada.");
+  }
   if (params.blob.type !== "application/pdf") {
     throw new Error("Apenas PDF oficial pode ser arquivado.");
   }
@@ -152,13 +207,14 @@ export async function arquivarPdfCrm(params: {
   const sha256 = Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, "0")).join("");
   const { data, error } = await supabase.from("crm_documentos_gerados").insert({
     tipo: params.tipo,
+    categoria: params.categoria || "gerado",
     proposta_id: params.tipo === "proposta" ? params.id : null,
     contrato_id: params.tipo === "contrato" ? params.id : null,
     nome_arquivo: params.nomeArquivo,
     conteudo_base64: arrayBufferBase64(buffer),
     sha256,
     campos_snapshot: params.campos,
-  }).select("id,tipo,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256").single();
+  }).select("id,tipo,categoria,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256").single();
   if (error) throw error;
   return data as DocumentoGeradoCrm;
 }
@@ -166,10 +222,31 @@ export async function arquivarPdfCrm(params: {
 export async function listarDocumentosCrm(tipo: TipoDocumentoCrm, id: number): Promise<DocumentoGeradoCrm[]> {
   const col = tipo === "proposta" ? "proposta_id" : "contrato_id";
   const { data, error } = await supabase.from("crm_documentos_gerados")
-    .select("id,tipo,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256")
+    .select("id,tipo,categoria,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256")
     .eq(col, id).order("id", { ascending: false }).limit(70);
   if (error) throw error;
   return (data || []) as DocumentoGeradoCrm[];
+}
+
+export async function sincronizarDocumentoDriveCrm(documentoId: number): Promise<{drive_url: string; drive_file_id: string}> {
+  const { data, error } = await supabase.functions.invoke("crm-drive-archive", {
+    body: { documentId: documentoId },
+  });
+  if (error) {
+    let mensagem = String(error.message || "Falha na conexão com o Google Drive.");
+    const response = (error as any).context;
+    if (response && typeof response.json === "function") {
+      try {
+        const payload = await response.json();
+        if (payload?.error) mensagem = String(payload.error);
+      } catch { /* keep generic error */ }
+    }
+    throw new Error(mensagem);
+  }
+  if (!data?.ok || !data?.drive_url || !data?.drive_file_id) {
+    throw new Error(String(data?.error || "O Drive não confirmou o arquivo."));
+  }
+  return { drive_url: String(data.drive_url), drive_file_id: String(data.drive_file_id) };
 }
 
 export async function baixarDocumentoArquivadoCrm(documentoId: number): Promise<Blob> {

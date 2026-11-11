@@ -141,6 +141,7 @@ export default function CrmProposalDetail({ proposta, cliente, negociacao, onClo
       {falha && <p role="alert" style={{ color: "#fda4af", margin: 0 }}>{falha}</p>}
       {!carregando && itens.length > 0 && (
         <CrmOfficialPdfActions kind="proposta" proposta={proposta} cliente={cliente}
+          onCamposSalvos={onSaved}
           negociacao={negociacao} itens={itens} />
       )}
       <div style={{ ...muted, fontSize: 12 }}>

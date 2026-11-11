@@ -47,13 +47,14 @@ function urlValida(url: string | null | undefined): url is string {
 }
 
 export default function CrmContractPreview({
-  contrato, cliente, negociacao, parceria, propostaAceita,
+  contrato, cliente, negociacao, parceria, propostaAceita, onCamposSalvos,
 }: {
   contrato: ContratoCrmBasico;
   cliente?: CrmCliente | null;
   negociacao?: CrmNegociacao | null;
   parceria?: ParceriaGratuita | null;
   propostaAceita?: CrmProposta | null;
+  onCamposSalvos?: () => Promise<void>;
 }) {
   const preliminar = ["rascunho", "em_revisao"].includes(contrato.status);
   const remunerado = ["servico_remunerado", "parceria_remunerada"].includes(contrato.tipo_modelo);
@@ -116,6 +117,7 @@ export default function CrmContractPreview({
       </div>
     </>}
     <CrmOfficialPdfActions key={contrato.id} kind="contrato" contrato={contrato} cliente={cliente}
+      onCamposSalvos={onCamposSalvos}
       negociacao={negociacao} parceria={parceria} propostaAceita={propostaAceita} />
     <div style={{ ...pequeno, fontSize: 12 }}>
       Fluxo de aprovação: rascunho → revisão → aprovação da diretoria → envio → assinatura → arquivamento.
