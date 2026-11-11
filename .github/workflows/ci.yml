@@ -30,3 +30,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Instalar motor PDF fixado para teste de compatibilidade
+        run: npm install --no-save --ignore-scripts --package-lock=false pdf-lib@1.17.1
+
+      - name: Verificar PDF real em leitor independente (Poppler)
+        run: |
+          command -v pdfinfo >/dev/null || (sudo apt-get update && sudo apt-get install -y poppler-utils)
+          node tests/crm-official-pdf-compat.test.mjs

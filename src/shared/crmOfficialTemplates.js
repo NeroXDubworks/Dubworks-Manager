@@ -1,3 +1,4 @@
+import { CAMPOS_MODELO } from "./crmOfficialFieldPositions.js";
 /**
  * Preenche os PDFs oficiais que a diretoria forneceu, preservando integralmente
  * as páginas e a identidade visual originais. Os arquivos são servidos pelo
@@ -62,27 +63,44 @@ async function templateDoc(kind) {
   if (!response.ok) throw new Error("Modelo oficial de " + kind + " não encontrado na implantação (" + response.status + ").");
   const bytes = await response.arrayBuffer();
   if (bytes.byteLength < 20000) throw new Error("O arquivo do modelo oficial está incompleto.");
-  const pdf = await lib.PDFDocument.load(bytes);
-  return { pdf, lib, form: pdf.getForm() };
+  return { bytes, lib };
 }
 
-function fit(form, key, raw, limits, appendix) {
-  const field = form.getTextField(key);
+function fitForStamp(key, raw, limits, appendix) {
   const original = clean(raw);
-  let shown = original;
   const limit = limits[key] || 58;
   if (original.length > limit) {
     appendix.push({ label: key.replace(/_/g, " ").toUpperCase(), value: original });
-    shown = "VER ANEXO COMPLEMENTAR";
+    return "VER ANEXO COMPLEMENTAR";
   }
-  field.setText(shown);
-  const isLong = ["objetivo", "anexo_descricao", "anexo_entregas", "anexo_etapas",
-    "anexo_direitos", "anexo_creditos", "anexo_observacoes"].includes(key);
-  if (isLong) field.enableMultiline();
-  // Evita texto cortado nos campos pequenos do layout oficial.
-  const small = /^(qtd_|unit_|subtotal_|total$)/.test(key);
-  const fontsize = small ? 7 : isLong ? 9 : 8;
-  try { field.setFontSize(fontsize); } catch (_) { /* O modelo possui fonte padrão; pdf-lib ajusta automaticamente. */ }
+  return original;
+}
+
+function desenharCampo(doc, font, cor, name, value, rect) {
+  if (!value) return;
+  const [pageIndex, x, top, width, height] = rect;
+  const page = doc.getPages()[pageIndex];
+  if (!page) throw new Error("Posição de campo inválida: " + name);
+  const { height: pageHeight } = page.getSize();
+  const multiline = height >= 38;
+  let size = width < 100 ? 7.3 : multiline ? 9.2 : 9;
+  let lines = wrapped(value, font, size, width - 12);
+  const maxHeight = height - 6;
+  while ((lines.length * size * 1.2 > maxHeight || lines.some(t => font.widthOfTextAtSize(t, size) > width - 10)) && size > 6.4) {
+    size -= 0.4;
+    lines = wrapped(value, font, size, width - 12);
+  }
+  if (lines.length * size * 1.2 > maxHeight) {
+    throw new Error("O campo " + name + " excede a área do modelo. Reduza o texto ou inclua no anexo.");
+  }
+  const lineHeight = size * 1.2;
+  const textHeight = lines.length * lineHeight;
+  const topPadding = multiline ? 6 : Math.max(5, (height - textHeight) / 2);
+  let baseline = pageHeight - top - topPadding - size;
+  for (const line of lines) {
+    if (line) page.drawText(line, { x: x + 6, y: baseline, size, font, color: cor });
+    baseline -= lineHeight;
+  }
 }
 
 function wrapped(text, font, size, maxWidth) {
@@ -258,23 +276,63 @@ export function camposContratoOficial({ contrato, cliente = null, negociacao = n
   return { fields, appendix: [] };
 }
 
-async function compose(kind, data) {
-  const { pdf, lib, form } = await templateDoc(kind);
+/**
+ * Exporta o mesmo PDF na web e nos testes de compatibilidade.
+ * A tabela de referências PDF tradicional evita o problema de leitores
+ * (Edge/Acrobat) rejeitarem arquivos serializados com object streams.
+ */
+export async function renderizarPdfOficial(kind, data, templateBytes, lib) {
+  if (!["proposta", "contrato"].includes(kind)) throw new Error("Modelo de PDF desconhecido.");
+  const original = await lib.PDFDocument.load(templateBytes);
+  const paginasModelo = kind === "proposta" ? 3 : 9;
+  if (original.getPageCount() !== paginasModelo) {
+    throw new Error("Modelo oficial incompatível: número de páginas inesperado.");
+  }
+
+  // Não modificar o AcroForm de origem. O pdf-lib pode deixar referências
+  // xref órfãs mesmo sem flatten. As páginas visuais são copiadas para um
+  // documento novo, e os valores são impressos por cima nos retângulos oficiais.
+  // Isso resulta num PDF não editável, sem widgets ou refs órfãs do formulário.
+  const pdf = await lib.PDFDocument.create();
+  const embutidas = await pdf.embedPdf(templateBytes, Array.from({ length: paginasModelo }, (_, i) => i));
+  for (const folha of embutidas) {
+    const pagina = pdf.addPage([folha.width, folha.height]);
+    pagina.drawPage(folha, { x: 0, y: 0, width: folha.width, height: folha.height });
+  }
+
   const { fields, appendix } = kind === "proposta" ? camposPropostaOficial(data) : camposContratoOficial(data);
   const limits = kind === "proposta" ? PROPOSAL_LIMITS : CONTRACT_LIMITS;
-  for (const [name, value] of Object.entries(fields)) fit(form, name, value, limits, appendix);
-  // O PDF fica não editável para que a versão enviada tenha uma apresentação estável.
+  const positions = CAMPOS_MODELO[kind];
   const font = await pdf.embedFont(lib.StandardFonts.Helvetica);
-  form.updateFieldAppearances(font);
-  form.flatten({ updateFieldAppearances: false });
+  const color = lib.rgb(0.14, 0.15, 0.25);
+  for (const [name, value] of Object.entries(fields)) {
+    const rect = positions[name];
+    if (!rect) throw new Error("Campo sem posição no modelo: " + name);
+    const shown = fitForStamp(name, value, limits, appendix);
+    desenharCampo(pdf, font, color, name, shown, rect);
+  }
+
   if (kind === "proposta" && !["aprovada", "enviada", "aceita"].includes(data.proposta.status)) {
     await identifyDraft(pdf, lib, "RASCUNHO - AGUARDANDO APROVAÇÃO");
   }
   await addAppendix(pdf, lib, appendix);
   pdf.setTitle(kind === "proposta" ? "DubWorks - Proposta comercial" : "DubWorks - Minuta de contrato");
   pdf.setAuthor("DubWorks");
-  const bytes = await pdf.save();
+
+  const bytes = await pdf.save({ useObjectStreams: false, updateFieldAppearances: false, addDefaultPage: false });
+  if (bytes.byteLength < 20000 || bytes[0] !== 37 || bytes[1] !== 80 || bytes[2] !== 68 || bytes[3] !== 70) {
+    throw new Error("Falha na exportação: o arquivo PDF ficou incompleto.");
+  }
+  const conferencia = await lib.PDFDocument.load(bytes);
+  if (conferencia.getPageCount() < paginasModelo || conferencia.getForm().getFields().length > 0) {
+    throw new Error("Falha na exportação: páginas ausentes ou formulário não removido.");
+  }
   return new Blob([bytes], { type: "application/pdf" });
+}
+
+async function compose(kind, data) {
+  const { bytes, lib } = await templateDoc(kind);
+  return renderizarPdfOficial(kind, data, bytes, lib);
 }
 
 export async function pdfPropostaOficial(data) { return compose("proposta", data); }

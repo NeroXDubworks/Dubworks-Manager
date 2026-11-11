@@ -28,6 +28,12 @@ export function camposContratoOficial(data: PdfContractData): {
  fields: Record<string, string>;
  appendix: Array<{label: string; value: string}>;
 };
+export function renderizarPdfOficial(
+  kind: "proposta" | "contrato",
+  data: PdfProposalData | PdfContractData,
+  templateBytes: Uint8Array | ArrayBuffer,
+  lib: any
+): Promise<Blob>;
 export function pdfPropostaOficial(data: PdfProposalData): Promise<Blob>;
 export function pdfContratoOficial(data: PdfContractData): Promise<Blob>;
 export function baixarDocumentoPdf(blob: Blob, nome: string): void;
