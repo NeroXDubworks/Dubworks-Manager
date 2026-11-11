@@ -76,6 +76,7 @@ export type TipoDocumentoCrm = "proposta" | "contrato";
 export type DocumentoGeradoCrm = {
   id: number;
   tipo: TipoDocumentoCrm;
+  categoria: "gerado" | "assinado";
   proposta_id: number | null;
   contrato_id: number | null;
   nome_arquivo: string;
@@ -186,7 +187,11 @@ function arrayBufferBase64(buffer: ArrayBuffer): string {
 export async function arquivarPdfCrm(params: {
   tipo: TipoDocumentoCrm; id: number; blob: Blob; nomeArquivo: string;
   campos: Record<string, string>;
+  categoria?: "gerado" | "assinado";
 }): Promise<DocumentoGeradoCrm> {
+  if (params.categoria === "assinado" && params.tipo !== "contrato") {
+    throw new Error("Somente contratos podem ter categoria assinada.");
+  }
   if (params.blob.type !== "application/pdf") {
     throw new Error("Apenas PDF oficial pode ser arquivado.");
   }
@@ -202,13 +207,14 @@ export async function arquivarPdfCrm(params: {
   const sha256 = Array.from(new Uint8Array(hash), x => x.toString(16).padStart(2, "0")).join("");
   const { data, error } = await supabase.from("crm_documentos_gerados").insert({
     tipo: params.tipo,
+    categoria: params.categoria || "gerado",
     proposta_id: params.tipo === "proposta" ? params.id : null,
     contrato_id: params.tipo === "contrato" ? params.id : null,
     nome_arquivo: params.nomeArquivo,
     conteudo_base64: arrayBufferBase64(buffer),
     sha256,
     campos_snapshot: params.campos,
-  }).select("id,tipo,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256").single();
+  }).select("id,tipo,categoria,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256").single();
   if (error) throw error;
   return data as DocumentoGeradoCrm;
 }
@@ -216,7 +222,7 @@ export async function arquivarPdfCrm(params: {
 export async function listarDocumentosCrm(tipo: TipoDocumentoCrm, id: number): Promise<DocumentoGeradoCrm[]> {
   const col = tipo === "proposta" ? "proposta_id" : "contrato_id";
   const { data, error } = await supabase.from("crm_documentos_gerados")
-    .select("id,tipo,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256")
+    .select("id,tipo,categoria,proposta_id,contrato_id,nome_arquivo,criado_em,drive_url,drive_file_id,sha256")
     .eq(col, id).order("id", { ascending: false }).limit(70);
   if (error) throw error;
   return (data || []) as DocumentoGeradoCrm[];
