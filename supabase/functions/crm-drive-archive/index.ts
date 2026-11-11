@@ -193,7 +193,11 @@ Deno.serve(async(req:Request)=>{
   }catch(error){
     const err=error instanceof ApiError?error:null;
     if(!err)console.error("crm-drive-archive",error instanceof Error?error.name:"unknown");
+    const detail=err?.code==="DRIVE_PERMISSION"
+      ? " Compartilhe a pasta comercial restrita com permissão de gravação para: "+
+        (Deno.env.get("GOOGLE_CLIENT_EMAIL")||"conta de serviço configurada")
+      : "";
     return json({ok:false,code:err?.code||"INTERNAL",
-      error:err?.message||"Falha inesperada. O arquivo permanece salvo no CRM."},err?.status||500);
+      error:(err?.message||"Falha inesperada. O arquivo permanece salvo no CRM.")+detail},err?.status||500);
   }
 });
