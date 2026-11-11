@@ -3,6 +3,7 @@ import type {
   CrmCliente, CrmNegociacao, CrmProposta, CrmPropostaItem, ParceriaGratuita,
 } from "../services/commercialCrm";
 import type { ContratoCrmBasico } from "./CrmContractPreview";
+import { pendenciasProposta, pendenciasContrato } from "../shared/crmDocumentReadiness.js";
 import {
   salvarCamposPdfCrm, arquivarPdfCrm, listarDocumentosCrm, baixarDocumentoArquivadoCrm, sincronizarDocumentoDriveCrm,
   type DocumentoGeradoCrm,
@@ -19,6 +20,7 @@ type ProposalProps = {
   cliente: CrmCliente;
   negociacao: CrmNegociacao;
   itens: CrmPropostaItem[];
+  onCamposSalvos?: () => Promise<void>;
 };
 type ContractProps = {
   kind: "contrato";
@@ -27,6 +29,7 @@ type ContractProps = {
   negociacao?: CrmNegociacao | null;
   parceria?: ParceriaGratuita | null;
   propostaAceita?: CrmProposta | null;
+  onCamposSalvos?: () => Promise<void>;
 };
 type Props = ProposalProps | ContractProps;
 const editable: React.CSSProperties = {
@@ -107,6 +110,9 @@ export default function CrmOfficialPdfActions(props: Props) {
   const fields = isProposal ? inputsProposta : inputsContrato;
   const incomplete = criticalContractFields.filter(k => !extras[k]?.trim());
   const data = { ...props, extras };
+  const pendencias = isProposal
+    ? pendenciasProposta({ ...entity, campos_pdf: extras })
+    : pendenciasContrato({ ...entity, campos_pdf: extras });
   const auto = useMemo(() => {
     try {
       return isProposal ? camposPropostaOficial(data as ProposalProps & { extras: PdfExtraFields }).fields
@@ -120,6 +126,7 @@ export default function CrmOfficialPdfActions(props: Props) {
     if (!isDraft || !dirty) return;
     await salvarCamposPdfCrm(tipo, entity.id, entity.status, extras);
     setDirty(false);
+    if (props.onCamposSalvos) await props.onCamposSalvos();
     setFeedback("Informações complementares salvas no Supabase.");
   }
 
@@ -211,6 +218,14 @@ export default function CrmOfficialPdfActions(props: Props) {
           " Modelo de 9 páginas, com as cláusulas originais e o Anexo Único."}
       </p>
     </div>
+    {podeGerar && pendencias.length > 0 && <div role="status" style={{
+      padding: 10, borderRadius: 8, background: "#302719", color: "#fce4ab", fontSize: 12,
+    }}>
+      <strong>Antes da aprovação ou envio, complete ({pendencias.length}):</strong>
+      <ul style={{ margin: "7px 0 0", paddingLeft: 20 }}>
+        {pendencias.map(item => <li key={item}>{item}</li>)}
+      </ul>
+    </div>}
     {podeGerar && <div style={{ ...small, color: "#d8c4f4" }}>
       {filledCount} de {totalCount} campos do modelo disponíveis para preenchimento. Campos sem dados ficam em branco.
     </div>}
