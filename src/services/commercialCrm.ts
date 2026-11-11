@@ -108,6 +108,56 @@ export async function salvarCamposPdfCrm(
   return (data.campos_pdf || {}) as Record<string, string>;
 }
 
+export type ContratoSemVinculoCrm = {
+  id: number;
+  titulo: string;
+  status: string;
+  negociacao_id: number;
+  negociacao_titulo: string;
+  cliente_nome: string;
+  propostas_aceitas: Array<{ id:number; versao:number; valor_negociado:number; titulo:string }>;
+};
+export async function listarContratosSemVinculoCrm(): Promise<ContratoSemVinculoCrm[]> {
+  const { data: contratos, error } = await supabase.from("crm_contratos")
+    .select("id,titulo,status,negociacao_id")
+    .is("proposta_id", null)
+    .not("negociacao_id", "is", null)
+    .in("status", ["rascunho", "em_revisao"])
+    .order("id", { ascending: true });
+  if (error) throw error;
+  if (!contratos?.length) return [];
+  const ids = [...new Set(contratos.map(c => Number(c.negociacao_id)))];
+  const [negResult, propostaResult] = await Promise.all([
+    supabase.from("crm_negociacoes").select("id,titulo,cliente_id").in("id", ids),
+    supabase.from("crm_propostas").select("id,titulo,versao,valor_negociado,negociacao_id")
+      .in("negociacao_id", ids).eq("status", "aceita"),
+  ]);
+  if (negResult.error) throw negResult.error;
+  if (propostaResult.error) throw propostaResult.error;
+  const negociacoes = negResult.data || [];
+  const clientIds = [...new Set(negociacoes.map(n => Number(n.cliente_id)))];
+  const clients = clientIds.length
+    ? await supabase.from("crm_clientes").select("id,nome").in("id", clientIds)
+    : { data:[], error:null };
+  if (clients.error) throw clients.error;
+  return contratos.map(contrato => {
+    const negociacao = negociacoes.find(n => Number(n.id) === Number(contrato.negociacao_id));
+    const cliente = (clients.data || []).find(c => Number(c.id) === Number(negociacao?.cliente_id));
+    const aceitas = (propostaResult.data || [])
+      .filter(p => Number(p.negociacao_id) === Number(contrato.negociacao_id))
+      .sort((a,b) => Number(b.versao)-Number(a.versao));
+    return {
+      id:Number(contrato.id), titulo:String(contrato.titulo),
+      status:String(contrato.status), negociacao_id:Number(contrato.negociacao_id),
+      negociacao_titulo:String(negociacao?.titulo || "Negociação sem nome"),
+      cliente_nome:String(cliente?.nome || "Cliente não localizado"),
+      propostas_aceitas:aceitas.map(p => ({
+        id:Number(p.id),versao:Number(p.versao),valor_negociado:Number(p.valor_negociado),titulo:String(p.titulo),
+      })),
+    };
+  });
+}
+
 export async function vincularContratoPropostaCrm(
   contratoId: number, propostaId: number, statusAtual: string
 ) {
