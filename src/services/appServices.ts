@@ -2218,7 +2218,8 @@ export async function lerRespostasEntregasViaEdge(
   planilhaEntregasIdOuUrl: string,
   pastaEntregasIdOuUrl = "",
   formEntregasIdOuUrl = "",
-  exigirSemanaEntrega = false
+  exigirSemanaEntrega = false,
+  namespaceResposta = ""
 ): Promise<EntregaProducao[]> {
   const spreadsheetId = extrairGoogleFileId(planilhaEntregasIdOuUrl);
   const folderId = extrairGoogleFolderId(pastaEntregasIdOuUrl);
@@ -2266,7 +2267,8 @@ export async function lerRespostasEntregasViaEdge(
 
   return data.respostas.map((item: any, index: number) => ({
     projeto_id: 0,
-    resposta_id: String(item.id || item.linha || index + 1),
+    // IDs das planilhas são números de linha: prefixar com Form evita colisão entre EPs.
+    resposta_id: (namespaceResposta ? namespaceResposta + ":" : "") + String(item.id || item.linha || index + 1),
     linha: Number(item.linha || index + 2),
     personagem: item.personagem || "",
     dublador: item.dublador || item.nome || item.membro || "",
