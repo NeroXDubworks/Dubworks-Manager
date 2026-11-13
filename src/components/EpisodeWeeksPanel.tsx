@@ -25,6 +25,7 @@ type Props = {
   subdivisoesExistentes?: Array<{ id: number; numero: number; titulo: string; status: string }>;
   onSemanaCriada?: () => Promise<void> | void;
   onEntregaAvaliada?: () => Promise<void> | void;
+  atualizarChave?: number;
 };
 
 const painel: React.CSSProperties = {
@@ -64,7 +65,7 @@ function semanasDoEpisodio(cortes: CorteEpisodio[], entregas: EntregaCorte[]): n
 }
 
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], onSemanaCriada, onEntregaAvaliada }: Props) {
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], onSemanaCriada, onEntregaAvaliada, atualizarChave = 0 }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [entregasSemEpisodio, setEntregasSemEpisodio] = useState<EntregaCorte[]>([]);
@@ -115,7 +116,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       if (ativo) setErro(e?.message || "Não foi possível carregar as semanas deste episódio.");
     }).finally(() => { if (ativo) setCarregando(false); });
     return () => { ativo = false; };
-  }, [projetoId, episodioId]);
+  }, [projetoId, episodioId, atualizarChave]);
 
   const semanas = useMemo(() => semanasDoEpisodio(cortes, entregas), [cortes, entregas]);
   const semanaAtual = semanaSelecionada && semanas.includes(semanaSelecionada)
