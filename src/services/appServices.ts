@@ -2295,7 +2295,7 @@ export async function salvarEntregasProducaoBanco(
   const ids = [...new Set(entregas.map((item) => item.resposta_id))];
   const { data: existentes, error: erroExistentes } = await supabase
     .from("entregas_producao")
-    .select("resposta_id, episodio_id, status, video_url, comentario")
+    .select("resposta_id, episodio_id, episodio_corte_id, status, video_url, comentario")
     .eq("projeto_id", Number(projetoId))
     .in("resposta_id", ids);
 
@@ -2309,6 +2309,7 @@ export async function salvarEntregasProducaoBanco(
   const payload = entregas.map((item) => ({
     projeto_id: Number(projetoId),
     episodio_id: item.episodio_id ?? porId.get(String(item.resposta_id))?.episodio_id ?? null,
+    episodio_corte_id: item.episodio_corte_id ?? porId.get(String(item.resposta_id))?.episodio_corte_id ?? null,
     resposta_id: item.resposta_id,
     linha: item.linha ?? null,
     personagem: item.personagem,
