@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { converterDriveParaPreview, atualizarStatusEntregaBanco, carregarParticipantesSemanaBanco, type ParticipanteSemanaProjeto } from "../services/appServices";
+import { converterDriveParaPreview, atualizarStatusEntregaBanco, carregarParticipantesSemanaBanco, enfileirarLembreteWhatsapp, type ParticipanteSemanaProjeto } from "../services/appServices";
 import { registrarHistoricoEpisodio } from "../services/projectEpisodes";
 import {
   alterarStatusCorte,
@@ -26,6 +26,10 @@ type Props = {
   onSemanaCriada?: () => Promise<void> | void;
   onEntregaAvaliada?: () => Promise<void> | void;
   atualizarChave?: number;
+  podeCobrar?: boolean;
+  nomeProjeto?: string;
+  numeroEpisodio?: number;
+  elencoEpisodio?: Array<{ personagem: string; dublador?: string | null; telefone?: string | null }>;
 };
 
 const painel: React.CSSProperties = {
@@ -65,7 +69,7 @@ function semanasDoEpisodio(cortes: CorteEpisodio[], entregas: EntregaCorte[]): n
 }
 
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], onSemanaCriada, onEntregaAvaliada, atualizarChave = 0 }: Props) {
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], onSemanaCriada, onEntregaAvaliada, atualizarChave = 0, podeCobrar = false, nomeProjeto = "", numeroEpisodio = 0, elencoEpisodio = [] }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [entregasSemEpisodio, setEntregasSemEpisodio] = useState<EntregaCorte[]>([]);
@@ -254,6 +258,67 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     }
   }
 
+
+  async function cobrarSemanaAtual() {
+    if (!podeCobrar || semanaAtual == null || salvando) return;
+    // Semanas históricas usam a escala da própria semana; novas usam o elenco do EP.
+    // Nunca inferir que "Semana 01" histórica pertence a outro episódio.
+    const escala = selecionado
+      ? elencoEpisodio.map(p => ({ personagem: p.personagem, dublador: p.dublador, telefone: p.telefone }))
+      : participantesHistoricos.map(p => ({
+          personagem: p.personagem, dublador: p.dublador, telefone: p.telefone_dublador,
+        }));
+    const pendentes = escala.filter(p => {
+      const personagem = normalizarPersonagem(p.personagem);
+      if (!personagem || !p.telefone?.trim() || !p.dublador?.trim()) return false;
+      const jaEnviou = entregasDaSemana.some(e => normalizarPersonagem(e.personagem) === personagem);
+      // Há gravações antigas ainda sem episódio: não cobrar até serem conferidas.
+      const precisaConferir = entregasSemEpisodio.some(e =>
+        normalizarPersonagem(e.personagem) === personagem &&
+        deliveryWeekNumbers(e.semana).includes(semanaAtual)
+      );
+      return !jaEnviou && !precisaConferir;
+    });
+    if (!pendentes.length) {
+      alert("Não há participantes confirmados sem entrega e com telefone nesta semana. Confira as entregas sem EP antes de cobrar.");
+      return;
+    }
+    const ep = "EP " + String(numeroEpisodio).padStart(2, "0");
+    if (!window.confirm(
+      "Enviar lembrete pelo bot para " + pendentes.length + " participante(s) de " +
+      ep + " · " + cutLabel(semanaAtual) + " de " + nomeProjeto + "?"
+    )) return;
+    setSalvando(true);
+    setErro("");
+    try {
+      let enviados = 0;
+      const falhas: string[] = [];
+      for (const item of pendentes) {
+        try {
+          await enfileirarLembreteWhatsapp({
+            projetoId: String(projetoId),
+            semana: semanaAtual,
+            personagem: item.personagem,
+            dublador: item.dublador || "",
+            telefone: item.telefone || "",
+            tipoLembrete: "episodio_semana_pendente",
+            mensagem: "Olá, " + (item.dublador || "tudo bem") +
+              "! Ainda não localizamos sua entrega de " + item.personagem + " no " +
+              ep + " · " + cutLabel(semanaAtual) + " de " + nomeProjeto +
+              ". Se já enviou, avise a produção para conferirmos. 💜",
+          });
+          enviados++;
+        } catch { falhas.push(item.personagem); }
+      }
+      alert("Lembretes enviados à fila: " + enviados +
+        (falhas.length ? ". Não enviados: " + falhas.join(", ") : ""));
+    } catch(e: any) {
+      setErro(e?.message || "Não foi possível enviar lembretes desta semana.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function avaliarEntrega(entrega: EntregaCorte, status: "aprovado" | "regravacao") {
     if (!podeEditar || salvando) return;
     const comentario = window.prompt(
@@ -387,6 +452,15 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
               )}
             </div>
           )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <strong style={{ color: "#e2e8f0" }}>Acompanhamento desta semana</strong>
+            {podeCobrar && (
+              <button type="button" style={{ ...botao, borderColor: "rgba(52,211,153,.35)", color: "#a7f3d0" }}
+                disabled={salvando} onClick={() => void cobrarSemanaAtual()}>
+                💬 Cobrar pendentes da semana
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "#cbd5e1", fontSize: 13 }}>
             <span>Recebidas: <strong>{entregasDaSemana.length}</strong></span>
             <span style={{ color: "#86efac" }}>Aprovadas: <strong>{entregasDaSemana.filter(e => e.status === "aprovado").length}</strong></span>
