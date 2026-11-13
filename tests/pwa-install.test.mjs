@@ -29,7 +29,7 @@ for (const size of [192, 512]) {
       icon.src === `/icons/dubworks-${size}.png` &&
       icon.sizes === `${size}x${size}` &&
       icon.type === "image/png" &&
-      icon.purpose.split(/\\s+/).includes("any")
+      icon.purpose.split(/\s+/).includes("any")
     ));
   });
 }
