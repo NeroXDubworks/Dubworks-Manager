@@ -27,6 +27,10 @@ export type ProjetoEpisodio = {
   pasta_cortes_id?: string | null;
   pasta_entregas_id?: string | null;
   pasta_finalizado_id?: string | null;
+  form_entregas_id?: string | null;
+  form_entregas_url?: string | null;
+  planilha_entregas_id?: string | null;
+  planilha_entregas_url?: string | null;
   criado_por?: string | null;
   criado_em?: string | null;
   atualizado_em?: string | null;
@@ -161,6 +165,53 @@ async function moverEstruturaDriveEpisodio(
   return data;
 }
 
+
+/** Prepara/reutiliza o Form exclusivo do episódio e salva seus links sem mexer no Form legado. */
+export async function prepararFormEpisodio(params: {
+  episodio: ProjetoEpisodio;
+  projectName: string;
+  personagens: string[];
+  capaUrl?: string;
+}) {
+  const { data: { session }, error: erroSessao } = await supabase.auth.getSession();
+  if (erroSessao || !session?.access_token) {
+    throw new Error("Sua sessão expirou. Entre novamente na DubWorks.");
+  }
+  if (!params.episodio.pasta_entregas_id) {
+    throw new Error("A pasta de Entregas do episódio não está cadastrada.");
+  }
+  const response = await fetch("/api/forms-episode", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + session.access_token,
+    },
+    body: JSON.stringify({
+      projectId: params.episodio.projeto_id,
+      episodeId: params.episodio.id,
+      projectName: params.projectName,
+      personagens: params.personagens,
+      capaUrl: params.capaUrl || "",
+    }),
+  });
+  const resultado = await response.json().catch(() => null);
+  if (!response.ok || !resultado?.ok) {
+    throw new Error(resultado?.error || "Não foi possível gerar o Forms deste episódio.");
+  }
+  const formulario = resultado.formEntregas || {};
+  const planilha = resultado.planilhaEntregas || {};
+  const url = (item: any) => String(
+    item.viewUrl || item.formUrl || item.url || item.editUrl || ""
+  ).trim();
+  const atualizado = await atualizarEpisodioProjeto(params.episodio.id, {
+    form_entregas_id: String(formulario.id || "").trim(),
+    form_entregas_url: url(formulario),
+    planilha_entregas_id: String(planilha.id || "").trim(),
+    planilha_entregas_url: url(planilha),
+  });
+  return atualizado;
+}
+
 export async function iniciarProducaoEpisodio(
   episodio: ProjetoEpisodio,
   usuario?: string
@@ -250,6 +301,10 @@ export async function atualizarEpisodioProjeto(
       | "pasta_cortes_id"
       | "pasta_entregas_id"
       | "pasta_finalizado_id"
+      | "form_entregas_id"
+      | "form_entregas_url"
+      | "planilha_entregas_id"
+      | "planilha_entregas_url"
     >
   >
 ) {
