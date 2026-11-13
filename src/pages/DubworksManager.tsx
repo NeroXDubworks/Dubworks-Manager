@@ -14324,6 +14324,10 @@ export default function DubworksManager() {
                       ? "@"
                       : notificacao.tipo === "resposta"
                       ? "↩"
+                      : notificacao.tipo === "entrega_semana"
+                      ? "🎙️"
+                      : notificacao.tipo === "regravacao_solicitada"
+                      ? "↻"
                       : "💬";
 
                   return (
