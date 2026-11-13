@@ -14027,6 +14027,7 @@ export default function DubworksManager() {
             projeto={projetoPainel}
             usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
             podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
+            podeCobrar={usuarioLogado?.cargo === "diretoria"}
             episodioInicialId={episodioNotificadoId}
           />
         </section>
