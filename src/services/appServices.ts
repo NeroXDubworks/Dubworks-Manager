@@ -2358,7 +2358,7 @@ export async function atualizarStatusEntregaBanco(
   avaliadoPor: string,
   comentarioLider?: string
 ): Promise<boolean> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("entregas_producao")
     .update({
       status,
@@ -2367,10 +2367,11 @@ export async function atualizarStatusEntregaBanco(
       data_avaliacao: new Date().toISOString(),
       atualizado_em: new Date().toISOString(),
     })
-    .eq("id", entregaId);
+    .eq("id", entregaId)
+    .select("id");
 
-  if (error) {
-    console.error("Erro ao atualizar status da entrega:", error);
+  if (error || !data?.length) {
+    console.error("Erro ao atualizar status da entrega:", error || "Nenhum registro atualizado");
     return false;
   }
 
