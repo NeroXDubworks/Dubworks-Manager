@@ -972,11 +972,13 @@ function lerRespostas_(payload, tipo) {
     'personagem desejado',
     'escolha o personagem',
   ]);
-  const iSemana = idx([
+  // Distinguir Semana/Corte de Episódio. Para Forms novos ambos existem:
+  // priorizar sempre a semana real; o episódio vem do formulário exclusivo.
+  const iSemanaCorte = idx([
     'semana', 'semana.', 'semana / corte', 'semana/corte',
-    'semena/corte', 'semena / corte',
-    'corte referente a semana', 'episódio', 'episodio',
+    'semena/corte', 'semena / corte', 'corte referente a semana',
   ]);
+  const iSemana = iSemanaCorte >= 0 ? iSemanaCorte : idx(['episódio', 'episodio']);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
   // Aceita títulos diferentes dos modelos novos e antigos de Forms.
   // A busca por cabeçalhos é tolerante a prefixos/sufixos como "(Opcional)".
