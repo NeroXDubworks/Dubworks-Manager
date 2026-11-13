@@ -25,6 +25,9 @@ jobs:
       - name: Testar leitura de respostas de Google Forms
         run: node --test tests/forms-response-parser.test.mjs
 
+      - name: Validar instalação PWA no celular
+        run: node --test tests/pwa-install.test.mjs
+
       - name: Testar semanas e entregas por episódio
         run: node --test tests/week-cuts.test.mjs
 
