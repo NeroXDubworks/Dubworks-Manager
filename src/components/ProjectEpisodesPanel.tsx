@@ -304,7 +304,7 @@ export default function ProjectEpisodesPanel({
           episodio_id: episodioAssociado,
           episodio_corte_id: anterior?.episodio_corte_id ??
             (formDoEpisodio
-              ? cortesAtuais.find((c) => c.semana === Number(rotulo.match(/\\bsemana\\s*0*(\\d+)/i)?.[1]))?.id ?? null
+              ? cortesAtuais.find((c) => c.semana === Number(rotulo.match(/\bsemana\s*0*(\d+)/i)?.[1]))?.id ?? null
               : null),
           status: anterior?.status || resposta.status || "pendente",
         };
