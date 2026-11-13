@@ -127,6 +127,38 @@ export async function listarEntregasParaCortes(projetoId: number, episodioId: nu
   return (data || []) as EntregaCorte[];
 }
 
+/** Entregas históricas que ainda não possuem episodio_id: vínculo SEMPRE manual. */
+export async function listarEntregasSemEpisodio(projetoId: number): Promise<EntregaCorte[]> {
+  inteiroPositivo(projetoId, "Projeto");
+  const { data, error } = await supabase.from("entregas_producao")
+    .select("id,projeto_id,episodio_id,episodio_corte_id,semana,personagem,dublador,telefone,status,video_url,comentario,comentario_lider,data_envio")
+    .eq("projeto_id", projetoId)
+    .is("episodio_id", null)
+    .order("id", { ascending: false });
+  if (error) throw error;
+  return (data || []) as EntregaCorte[];
+}
+
+/** Nunca vincula só pelo nome Semana 01. A direção seleciona o episódio explicitamente. */
+export async function vincularEntregaAoEpisodio(params: {
+  entregaId: number;
+  projetoId: number;
+  episodioId: number;
+}) {
+  inteiroPositivo(params.entregaId, "Entrega");
+  inteiroPositivo(params.projetoId, "Projeto");
+  inteiroPositivo(params.episodioId, "Episódio");
+  const { data, error } = await supabase.from("entregas_producao")
+    .update({ episodio_id: params.episodioId })
+    .eq("id", params.entregaId)
+    .eq("projeto_id", params.projetoId)
+    .is("episodio_id", null)
+    .select("id");
+  if (error) throw error;
+  if (!data?.length) throw new Error("Entrega já vinculada ou indisponível. Atualize os dados.");
+  return true;
+}
+
 export function candidatasLegadasPorCorte(entregas: EntregaCorte[], corte: CorteEpisodio) {
   return entregas.filter((entrega) => legacyDeliveryIsCandidate(entrega, corte));
 }
