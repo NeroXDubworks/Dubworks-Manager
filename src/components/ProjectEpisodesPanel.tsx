@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { ElencoItem, Projeto, ProjetoSemana } from "../types";
 import EpisodeWeeksPanel from "./EpisodeWeeksPanel";
+import { listarCortesEpisodio } from "../services/episodeCuts";
 import {
   enfileirarLembreteWhatsapp,
   criarAtualizarFormulariosProjeto,
@@ -251,12 +252,12 @@ export default function ProjectEpisodesPanel({
       setSincronizandoEntregasEpisodio(true);
       setErro("");
       const links = extrairLinksDrive(projeto.Observacoes || "");
-      if (!links.planilhaEntregas && !links.entregasProjeto && !links.projeto) {
+      if (!episodio.planilha_entregas_id && !episodio.planilha_entregas_url && !links.planilhaEntregas && !links.entregasProjeto && !links.projeto) {
         throw new Error("A planilha de entregas ainda não está vinculada ao projeto.");
       }
 
       const formDoEpisodio = Boolean(episodio.form_entregas_id && (episodio.planilha_entregas_id || episodio.planilha_entregas_url));
-      const [respostas, salvasAnteriormente] = await Promise.all([
+      const [respostas, salvasAnteriormente, cortesAtuais] = await Promise.all([
         lerRespostasEntregasViaEdge(
           projeto.ID,
           (formDoEpisodio ? episodio.planilha_entregas_id || episodio.planilha_entregas_url : links.planilhaEntregas) || "",
@@ -266,6 +267,7 @@ export default function ProjectEpisodesPanel({
           formDoEpisodio ? String(episodio.form_entregas_id) : ""
         ),
         carregarEntregasProducaoBanco(projeto.ID),
+        listarCortesEpisodio(Number(projeto.ID), episodio.id),
       ]);
 
       if (respostas.length === 0) {
@@ -301,6 +303,10 @@ export default function ProjectEpisodesPanel({
           ...resposta,
           projeto_id: Number(projeto.ID),
           episodio_id: episodioAssociado,
+          episodio_corte_id: anterior?.episodio_corte_id ??
+            (formDoEpisodio
+              ? cortesAtuais.find((c) => c.semana === Number(rotulo.match(/\\bsemana\\s*0*(\\d+)/i)?.[1]))?.id ?? null
+              : null),
           status: anterior?.status || resposta.status || "pendente",
         };
       });
