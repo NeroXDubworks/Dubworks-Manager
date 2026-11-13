@@ -27,6 +27,7 @@ import {
   encerrarSelecaoSemSubstituicao,
   finalizarEpisodioProjeto,
   iniciarProducaoEpisodio,
+  prepararFormEpisodio,
   marcarSelecaoEmAvaliacao,
   reabrirEpisodioProjeto,
   removerElencoDoEpisodio,
@@ -44,6 +45,7 @@ type Props = {
   podeEditar?: boolean;
   semanasLegadas?: ProjetoSemana[];
   onAbrirAcervo?: () => void;
+  episodioInicialId?: number | null;
 };
 
 const card: React.CSSProperties = {
@@ -132,6 +134,7 @@ export default function ProjectEpisodesPanel({
   podeEditar = false,
   semanasLegadas = [],
   onAbrirAcervo,
+  episodioInicialId,
 }: Props) {
   const [episodios, setEpisodios] = useState<ProjetoEpisodio[]>([]);
   const [episodioId, setEpisodioId] = useState<number | null>(null);
@@ -200,6 +203,7 @@ export default function ProjectEpisodesPanel({
 
       const preferido =
         (preferirId && principais.find((item) => item.id === preferirId)) ||
+        (episodioInicialId && principais.find((item) => item.id === episodioInicialId)) ||
         (episodioId && principais.find((item) => item.id === episodioId)) ||
         principais.find((item) => item.status === "em_producao") ||
         principais[0] ||
@@ -251,13 +255,15 @@ export default function ProjectEpisodesPanel({
         throw new Error("A planilha de entregas ainda não está vinculada ao projeto.");
       }
 
+      const formDoEpisodio = Boolean(episodio.form_entregas_id && (episodio.planilha_entregas_id || episodio.planilha_entregas_url));
       const [respostas, salvasAnteriormente] = await Promise.all([
         lerRespostasEntregasViaEdge(
           projeto.ID,
-          links.planilhaEntregas || "",
-          links.entregasProjeto || links.projeto || "",
-          links.formEntregasId || links.formEntregas || "",
-          Boolean(links.exigirSemanaEntrega)
+          (formDoEpisodio ? episodio.planilha_entregas_id || episodio.planilha_entregas_url : links.planilhaEntregas) || "",
+          (formDoEpisodio ? episodio.pasta_entregas_id : links.entregasProjeto || links.projeto) || "",
+          (formDoEpisodio ? episodio.form_entregas_id : links.formEntregasId || links.formEntregas) || "",
+          !formDoEpisodio && Boolean(links.exigirSemanaEntrega),
+          formDoEpisodio ? String(episodio.form_entregas_id) : ""
         ),
         carregarEntregasProducaoBanco(projeto.ID),
       ]);
@@ -286,6 +292,7 @@ export default function ProjectEpisodesPanel({
         // Para projetos de episódio único, vinculamos também as entregas legadas.
         // Para múltiplos episódios, nunca atribuímos uma semana arbitrariamente.
         const episodioAssociado =
+          (formDoEpisodio ? episodio.id : null) ??
           episodioIndicado?.id ??
           anterior?.episodio_id ??
           (episodiosPrincipais.length === 1 ? episodiosPrincipais[0].id : null);
@@ -428,6 +435,12 @@ export default function ProjectEpisodesPanel({
   }, [projeto.ID]);
 
   useEffect(() => {
+    if (episodioInicialId && episodios.some((item) => item.id === episodioInicialId)) {
+      setEpisodioId(episodioInicialId);
+    }
+  }, [episodioInicialId, episodios]);
+
+  useEffect(() => {
     if (!episodioId) {
       setElenco([]);
       setEntregas([]);
@@ -499,11 +512,12 @@ export default function ProjectEpisodesPanel({
       }
 
       try {
-        const listaAtualizada = [
-          ...episodios.filter((item) => item.id !== criado.id),
-          criado,
-        ];
-        await sincronizarFormsEpisodios(listaAtualizada);
+        await prepararFormEpisodio({
+          episodio: criado,
+          projectName: projeto.Projeto,
+          personagens: (projeto.Elenco || []).map((p) => p.personagem).filter(Boolean),
+          capaUrl: projeto.Capa_URL || "",
+        });
       } catch (erro: any) {
         console.warn(
           "Episódio criado, mas o Form de Entregas não foi sincronizado:",
@@ -524,6 +538,24 @@ export default function ProjectEpisodesPanel({
       }
     } catch (e: any) {
       alert(e?.message || "Não foi possível criar o episódio.");
+    }
+  }
+
+
+  async function gerarOuAtualizarFormEpisodio() {
+    if (!podeEditar || !episodio) return;
+    try {
+      setErro("");
+      await prepararFormEpisodio({
+        episodio,
+        projectName: projeto.Projeto,
+        personagens: (projeto.Elenco || []).map((p) => p.personagem).filter(Boolean),
+        capaUrl: projeto.Capa_URL || "",
+      });
+      await recarregarEpisodios(episodio.id);
+      alert("Form do EP " + String(episodio.numero).padStart(2, "0") + " sincronizado sem alterar os Forms de outros episódios.");
+    } catch (e: any) {
+      setErro(e?.message || "Não foi possível preparar o Form deste episódio.");
     }
   }
 
@@ -1010,6 +1042,15 @@ export default function ProjectEpisodesPanel({
                           ? "Sincronizando entregas..."
                           : "↻ Sincronizar entregas"}
                       </button>
+                      <button type="button" style={secondary}
+                        onClick={() => void gerarOuAtualizarFormEpisodio()}>
+                        {episodio.form_entregas_id ? "↻ Atualizar Form deste EP" : "+ Gerar Form deste EP"}
+                      </button>
+                      {episodio.form_entregas_url && (
+                        <a style={{ ...secondary, textDecoration: "none" }} href={episodio.form_entregas_url} target="_blank" rel="noopener noreferrer">
+                          Abrir Form EP {String(episodio.numero).padStart(2, "0")} ↗
+                        </a>
+                      )}
                       {episodio.status === "nao_iniciado" && (
                         <button style={secondary} onClick={iniciarProducao}>
                           Iniciar produção
@@ -1062,6 +1103,12 @@ export default function ProjectEpisodesPanel({
                     {episodio.descricao}
                   </p>
                 )}
+              </div>
+
+              <div style={{ color: "#94a3b8", fontSize: 13, background: "rgba(2,6,23,.4)", borderRadius: 10, padding: 12 }}>
+                {episodio.form_entregas_id
+                  ? "Este episódio usa um Forms exclusivo. Após cadastrar novos cortes, clique em Atualizar Form deste EP para publicar as semanas disponíveis."
+                  : "Episódio antigo: as entregas permanecem vinculadas ao formulário legado até que um Forms exclusivo seja criado."}
               </div>
 
               <EpisodeWeeksPanel
