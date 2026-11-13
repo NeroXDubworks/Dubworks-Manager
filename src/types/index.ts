@@ -179,6 +179,7 @@ export type EntregaProducao = {
   id?: number;
   projeto_id: number;
   episodio_id?: number | null;
+  episodio_corte_id?: number | null;
   resposta_id: string;
   linha?: number | null;
   personagem: string;

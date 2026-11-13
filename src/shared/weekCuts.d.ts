@@ -10,3 +10,6 @@ export function formatCutDuration(rawSeconds: number): string;
 export function sumCutDurations(cuts: CorteDuracao[]): number;
 export function cutLabel(number: number): string;
 export function legacyDeliveryIsCandidate(delivery: CandidatoEntregaLegada, cut: CorteIdentificador): boolean;
+
+/** Todas as semanas de uma entrega (o episódio já deve estar validado). */
+export function deliveryWeekNumbers(value: string | null | undefined): number[];

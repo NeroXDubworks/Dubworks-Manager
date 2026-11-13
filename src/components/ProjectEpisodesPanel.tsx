@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { ElencoItem, Projeto, ProjetoSemana } from "../types";
+import type { ElencoItem, Projeto } from "../types";
 import EpisodeWeeksPanel from "./EpisodeWeeksPanel";
+import { listarCortesEpisodio } from "../services/episodeCuts";
 import {
-  enfileirarLembreteWhatsapp,
-  criarAtualizarFormulariosProjeto,
   lerRespostasEntregasViaEdge,
   carregarEntregasProducaoBanco,
   salvarEntregasProducaoBanco,
@@ -27,6 +26,7 @@ import {
   encerrarSelecaoSemSubstituicao,
   finalizarEpisodioProjeto,
   iniciarProducaoEpisodio,
+  prepararFormEpisodio,
   marcarSelecaoEmAvaliacao,
   reabrirEpisodioProjeto,
   removerElencoDoEpisodio,
@@ -42,8 +42,8 @@ type Props = {
   projeto: Projeto;
   usuarioNome?: string;
   podeEditar?: boolean;
-  semanasLegadas?: ProjetoSemana[];
-  onAbrirAcervo?: () => void;
+  podeCobrar?: boolean;
+  episodioInicialId?: number | null;
 };
 
 const card: React.CSSProperties = {
@@ -130,8 +130,8 @@ export default function ProjectEpisodesPanel({
   projeto,
   usuarioNome = "Sistema",
   podeEditar = false,
-  semanasLegadas = [],
-  onAbrirAcervo,
+  podeCobrar = false,
+  episodioInicialId,
 }: Props) {
   const [episodios, setEpisodios] = useState<ProjetoEpisodio[]>([]);
   const [episodioId, setEpisodioId] = useState<number | null>(null);
@@ -141,6 +141,7 @@ export default function ProjectEpisodesPanel({
   const [historico, setHistorico] = useState<EpisodioHistorico[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [sincronizandoEntregasEpisodio, setSincronizandoEntregasEpisodio] = useState(false);
+  const [versaoEntregas, setVersaoEntregas] = useState(0);
   const [erro, setErro] = useState("");
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [novo, setNovo] = useState({
@@ -200,6 +201,7 @@ export default function ProjectEpisodesPanel({
 
       const preferido =
         (preferirId && principais.find((item) => item.id === preferirId)) ||
+        (episodioInicialId && principais.find((item) => item.id === episodioInicialId)) ||
         (episodioId && principais.find((item) => item.id === episodioId)) ||
         principais.find((item) => item.status === "em_producao") ||
         principais[0] ||
@@ -247,19 +249,22 @@ export default function ProjectEpisodesPanel({
       setSincronizandoEntregasEpisodio(true);
       setErro("");
       const links = extrairLinksDrive(projeto.Observacoes || "");
-      if (!links.planilhaEntregas && !links.entregasProjeto && !links.projeto) {
+      if (!episodio.planilha_entregas_id && !episodio.planilha_entregas_url && !links.planilhaEntregas && !links.entregasProjeto && !links.projeto) {
         throw new Error("A planilha de entregas ainda não está vinculada ao projeto.");
       }
 
-      const [respostas, salvasAnteriormente] = await Promise.all([
+      const formDoEpisodio = Boolean(episodio.form_entregas_id && (episodio.planilha_entregas_id || episodio.planilha_entregas_url));
+      const [respostas, salvasAnteriormente, cortesAtuais] = await Promise.all([
         lerRespostasEntregasViaEdge(
           projeto.ID,
-          links.planilhaEntregas || "",
-          links.entregasProjeto || links.projeto || "",
-          links.formEntregasId || links.formEntregas || "",
-          Boolean(links.exigirSemanaEntrega)
+          (formDoEpisodio ? episodio.planilha_entregas_id || episodio.planilha_entregas_url : links.planilhaEntregas) || "",
+          (formDoEpisodio ? episodio.pasta_entregas_id : links.entregasProjeto || links.projeto) || "",
+          (formDoEpisodio ? episodio.form_entregas_id : links.formEntregasId || links.formEntregas) || "",
+          !formDoEpisodio && Boolean(links.exigirSemanaEntrega),
+          formDoEpisodio ? String(episodio.form_entregas_id) : ""
         ),
         carregarEntregasProducaoBanco(projeto.ID),
+        listarCortesEpisodio(Number(projeto.ID), episodio.id),
       ]);
 
       if (respostas.length === 0) {
@@ -286,6 +291,7 @@ export default function ProjectEpisodesPanel({
         // Para projetos de episódio único, vinculamos também as entregas legadas.
         // Para múltiplos episódios, nunca atribuímos uma semana arbitrariamente.
         const episodioAssociado =
+          (formDoEpisodio ? episodio.id : null) ??
           episodioIndicado?.id ??
           anterior?.episodio_id ??
           (episodiosPrincipais.length === 1 ? episodiosPrincipais[0].id : null);
@@ -294,6 +300,10 @@ export default function ProjectEpisodesPanel({
           ...resposta,
           projeto_id: Number(projeto.ID),
           episodio_id: episodioAssociado,
+          episodio_corte_id: anterior?.episodio_corte_id ??
+            (formDoEpisodio
+              ? cortesAtuais.find((c) => c.semana === Number(rotulo.match(/\bsemana\s*0*(\d+)/i)?.[1]))?.id ?? null
+              : null),
           status: anterior?.status || resposta.status || "pendente",
         };
       });
@@ -302,6 +312,7 @@ export default function ProjectEpisodesPanel({
       if (!ok) throw new Error("Não foi possível salvar as respostas no Supabase.");
 
       await recarregarDetalhes(episodio.id);
+      setVersaoEntregas((v) => v + 1);
       const desteEpisodio = respostasVinculadas.filter(
         (item) => item.episodio_id === episodio.id
       ).length;
@@ -323,109 +334,16 @@ export default function ProjectEpisodesPanel({
     }
   }
 
-  async function sincronizarFormsEpisodios(lista: ProjetoEpisodio[]) {
-    const links = extrairLinksDrive(projeto.Observacoes || "");
-    const respostasSelecaoFolderId = extrairGoogleFolderId(
-      links.respostasSelecao || ""
-    );
-    const entregasFolderId = extrairGoogleFolderId(
-      links.entregasProjeto || ""
-    );
-
-    if (!respostasSelecaoFolderId || !entregasFolderId) {
-      throw new Error(
-        "A estrutura do Drive do projeto ainda não possui as pastas necessárias para sincronizar os Forms."
-      );
-    }
-
-    const personagensEntregas = Array.from(
-      new Set(
-        (projeto.Elenco || [])
-          .map((item) => String(item.personagem || "").trim())
-          .filter(Boolean)
-      )
-    );
-    const personagensSelecao = Array.from(
-      new Set(
-        (projeto.Elenco || [])
-          .filter((item) => item.em_selecao !== false)
-          .map((item) => String(item.personagem || "").trim())
-          .filter(Boolean)
-      )
-    );
-    const episodiosForm = [...lista]
-      .sort((a, b) => a.numero - b.numero)
-      .map(
-        (item) =>
-          `EP ${String(item.numero).padStart(2, "0")} - ${item.titulo || "Sem título"}`
-      );
-
-    const retorno = await criarAtualizarFormulariosProjeto({
-      projectId: projeto.ID,
-      projectName: projeto.Projeto,
-      projectType: projeto.Tipo || "Projeto",
-      capaUrl: projeto.Capa_URL || "",
-      respostasSelecaoFolderId,
-      entregasFolderId,
-      falasTesteFolderId: extrairGoogleFolderId(links.falasTeste || ""),
-      cortesProjetoFolderId: extrairGoogleFolderId(links.cortesProjeto || ""),
-      personagensSelecao,
-      personagensEntregas,
-      elenco: projeto.Elenco || [],
-      episodios: episodiosForm,
-      existingSelectionFormId: links.formSelecaoId || extrairGoogleFileId(links.formSelecao || ""),
-      existingDeliveriesFormId: links.formEntregasId || extrairGoogleFileId(links.formEntregas || ""),
-    });
-
-    const lerUrl = (valor: any) =>
-      String(
-        valor?.viewUrl ||
-          valor?.formUrl ||
-          valor?.url ||
-          valor?.editUrl ||
-          valor ||
-          ""
-      ).trim();
-
-    const novosLinks = {
-      ...links,
-      // O link público é usado pelos dubladores; o ID interno evita
-      // a criação de cópias do Form ao atualizar episódios e escalações.
-      formSelecaoId: String(
-        retorno?.formSelecao?.id || links.formSelecaoId || extrairGoogleFileId(links.formSelecao || "")
-      ),
-      formEntregasId: String(
-        retorno?.formEntregas?.id || links.formEntregasId || extrairGoogleFileId(links.formEntregas || "")
-      ),
-      formSelecao:
-        lerUrl(retorno?.formSelecao) || links.formSelecao || "",
-      formEntregas:
-        lerUrl(retorno?.formEntregas) || links.formEntregas || "",
-      planilhaSelecao:
-        lerUrl(retorno?.planilhaSelecao) || links.planilhaSelecao || "",
-      planilhaEntregas:
-        lerUrl(retorno?.planilhaEntregas) || links.planilhaEntregas || "",
-    };
-
-    const observacoes = salvarLinksDriveEmObservacoes(
-      projeto.Observacoes || "",
-      novosLinks
-    );
-
-    if (observacoes !== (projeto.Observacoes || "")) {
-      const ok = await atualizarObservacoesProjetoBanco(projeto.ID, observacoes);
-      if (!ok) {
-        throw new Error(
-          "Os Forms foram sincronizados, mas os links não puderam ser salvos no projeto."
-        );
-      }
-    }
-  }
-
   useEffect(() => {
     setEpisodioId(null);
     void recarregarEpisodios(null);
   }, [projeto.ID]);
+
+  useEffect(() => {
+    if (episodioInicialId && episodios.some((item) => item.id === episodioInicialId)) {
+      setEpisodioId(episodioInicialId);
+    }
+  }, [episodioInicialId, episodios]);
 
   useEffect(() => {
     if (!episodioId) {
@@ -499,11 +417,12 @@ export default function ProjectEpisodesPanel({
       }
 
       try {
-        const listaAtualizada = [
-          ...episodios.filter((item) => item.id !== criado.id),
-          criado,
-        ];
-        await sincronizarFormsEpisodios(listaAtualizada);
+        await prepararFormEpisodio({
+          episodio: criado,
+          projectName: projeto.Projeto,
+          personagens: (projeto.Elenco || []).map((p) => p.personagem).filter(Boolean),
+          capaUrl: projeto.Capa_URL || "",
+        });
       } catch (erro: any) {
         console.warn(
           "Episódio criado, mas o Form de Entregas não foi sincronizado:",
@@ -524,6 +443,24 @@ export default function ProjectEpisodesPanel({
       }
     } catch (e: any) {
       alert(e?.message || "Não foi possível criar o episódio.");
+    }
+  }
+
+
+  async function gerarOuAtualizarFormEpisodio() {
+    if (!podeEditar || !episodio) return;
+    try {
+      setErro("");
+      await prepararFormEpisodio({
+        episodio,
+        projectName: projeto.Projeto,
+        personagens: (projeto.Elenco || []).map((p) => p.personagem).filter(Boolean),
+        capaUrl: projeto.Capa_URL || "",
+      });
+      await recarregarEpisodios(episodio.id);
+      alert("Form do EP " + String(episodio.numero).padStart(2, "0") + " sincronizado sem alterar os Forms de outros episódios.");
+    } catch (e: any) {
+      setErro(e?.message || "Não foi possível preparar o Form deste episódio.");
     }
   }
 
@@ -735,66 +672,6 @@ export default function ProjectEpisodesPanel({
     } catch (e: any) {
       alert(e?.message || "Não foi possível iniciar a produção.");
     }
-  }
-
-  async function cobrarPendentes() {
-    if (!episodio) return;
-
-    const pendentes = resumo.situacoes.filter(
-      (item) => item.pendente && item.telefone?.trim()
-    );
-
-    if (!pendentes.length) {
-      alert("Não há dubladores pendentes com telefone cadastrado.");
-      return;
-    }
-
-    if (
-      !window.confirm(
-        "Enviar cobrança pelo bot para " +
-          pendentes.length +
-          " pendente(s) do EP " +
-          String(episodio.numero).padStart(2, "0") +
-          "?"
-      )
-    ) {
-      return;
-    }
-
-    let enviados = 0;
-    let falhas = 0;
-
-    for (const item of pendentes) {
-      try {
-        await enfileirarLembreteWhatsapp({
-          projetoId: projeto.ID,
-          semana: episodio.numero,
-          personagem: item.personagem,
-          dublador: item.dublador || "",
-          telefone: item.telefone || "",
-          tipoLembrete: "episodio_pendente",
-          mensagem:
-            "Olá, " +
-            (item.dublador || "tudo bem") +
-            "! Passando para lembrar que a entrega de " +
-            item.personagem +
-            " no episódio " +
-            String(episodio.numero).padStart(2, "0") +
-            " de " +
-            projeto.Projeto +
-            " ainda está pendente. Se já enviou, pode desconsiderar esta mensagem. 💜",
-        });
-        enviados += 1;
-      } catch {
-        falhas += 1;
-      }
-    }
-
-    alert(
-      "Cobrança colocada na fila. Enviados: " +
-        enviados +
-        (falhas ? " • Falhas: " + falhas : "")
-    );
   }
 
   return (
@@ -1010,6 +887,15 @@ export default function ProjectEpisodesPanel({
                           ? "Sincronizando entregas..."
                           : "↻ Sincronizar entregas"}
                       </button>
+                      <button type="button" style={secondary}
+                        onClick={() => void gerarOuAtualizarFormEpisodio()}>
+                        {episodio.form_entregas_id ? "↻ Atualizar Form deste EP" : "+ Gerar Form deste EP"}
+                      </button>
+                      {episodio.form_entregas_url && (
+                        <a style={{ ...secondary, textDecoration: "none" }} href={episodio.form_entregas_url} target="_blank" rel="noopener noreferrer">
+                          Abrir Form EP {String(episodio.numero).padStart(2, "0")} ↗
+                        </a>
+                      )}
                       {episodio.status === "nao_iniciado" && (
                         <button style={secondary} onClick={iniciarProducao}>
                           Iniciar produção
@@ -1064,6 +950,12 @@ export default function ProjectEpisodesPanel({
                 )}
               </div>
 
+              <div style={{ color: "#94a3b8", fontSize: 13, background: "rgba(2,6,23,.4)", borderRadius: 10, padding: 12 }}>
+                {episodio.form_entregas_id
+                  ? "Este episódio usa um Forms exclusivo. Após cadastrar novos cortes, clique em Atualizar Form deste EP para publicar as semanas disponíveis."
+                  : "Episódio antigo: as entregas permanecem vinculadas ao formulário legado até que um Forms exclusivo seja criado."}
+              </div>
+
               <EpisodeWeeksPanel
                 key={episodio.id}
                 projetoId={Number(projeto.ID)}
@@ -1071,8 +963,22 @@ export default function ProjectEpisodesPanel({
                 podeEditar={podeEditar}
                 usuarioNome={usuarioNome}
                 subdivisoesExistentes={episodios.filter(item => item.parent_id === episodio.id)}
-                semanasLegadas={episodiosPrincipais.length === 1 ? semanasLegadas : []}
-                onAbrirAcervo={onAbrirAcervo}
+                atualizarChave={versaoEntregas}
+                podeCobrar={podeCobrar}
+                nomeProjeto={projeto.Projeto}
+                numeroEpisodio={episodio.numero}
+                elencoEpisodio={elenco}
+                onEntregaAvaliada={async () => { await recarregarDetalhes(episodio.id); }}
+                onSemanaCriada={async () => {
+                  if (!episodio.form_entregas_id) return;
+                  await prepararFormEpisodio({
+                    episodio,
+                    projectName: projeto.Projeto,
+                    personagens: (projeto.Elenco || []).map((p) => p.personagem).filter(Boolean),
+                    capaUrl: projeto.Capa_URL || "",
+                  });
+                  await recarregarEpisodios(episodio.id);
+                }}
               />
 
               <div
@@ -1282,85 +1188,6 @@ export default function ProjectEpisodesPanel({
               >
                 <div style={{ display: "grid", gap: 14 }}>
                   <div style={card}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                        alignItems: "center",
-                      }}
-                    >
-                      <strong style={{ color: "#f8fafc" }}>
-                        Entregas do episódio
-                      </strong>
-                      <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                        {resumo.entregaram}/{resumo.previstos} receberam
-                      </span>
-                    </div>
-
-                    <div
-                      style={{
-                        height: 8,
-                        borderRadius: 999,
-                        background: "rgba(148,163,184,.12)",
-                        overflow: "hidden",
-                        margin: "10px 0 14px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: resumo.progressoRecebimento + "%",
-                          height: "100%",
-                          background:
-                            "linear-gradient(90deg,#7c3aed,#8b5cf6)",
-                        }}
-                      />
-                    </div>
-
-                    <div style={{ display: "grid", gap: 7 }}>
-                      {entregas.slice(0, 8).map((entrega: any) => (
-                        <div
-                          key={entrega.id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 1fr auto",
-                            gap: 10,
-                            padding: 9,
-                            borderRadius: 9,
-                            background: "rgba(2,6,23,.42)",
-                          }}
-                        >
-                          <span style={{ color: "#e2e8f0" }}>
-                            {entrega.personagem || "Personagem"}
-                          </span>
-                          <span style={{ color: "#94a3b8" }}>
-                            {entrega.dublador || "—"}
-                          </span>
-                          <span
-                            style={{
-                              color:
-                                entrega.status === "aprovado"
-                                  ? "#86efac"
-                                  : entrega.status === "regravacao"
-                                  ? "#fda4af"
-                                  : "#fde68a",
-                              fontSize: 12,
-                              fontWeight: 800,
-                            }}
-                          >
-                            {entrega.status || "pendente"}
-                          </span>
-                        </div>
-                      ))}
-                      {!entregas.length && (
-                        <span style={{ color: "#64748b" }}>
-                          Nenhuma entrega vinculada a este episódio.
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={card}>
                     <strong style={{ color: "#f8fafc" }}>
                       Seleções do episódio
                     </strong>
@@ -1449,8 +1276,9 @@ export default function ProjectEpisodesPanel({
                 <div style={{ display: "grid", gap: 14, alignSelf: "start" }}>
                   <div style={card}>
                     <strong style={{ color: "#f8fafc" }}>
-                      Quem está pendente
+                      Sem gravação registrada no EP
                     </strong>
+                    <p style={{ color: "#94a3b8", fontSize: 12, margin: "7px 0 0" }}>Para conferir e cobrar por semana, use o painel de gravações acima.</p>
                     <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                       {resumo.situacoes
                         .filter((item) => item.pendente)
@@ -1479,12 +1307,7 @@ export default function ProjectEpisodesPanel({
                       )}
                     </div>
 
-                    <button
-                      style={{ ...primary, width: "100%", marginTop: 12 }}
-                      onClick={cobrarPendentes}
-                    >
-                      💬 Cobrar pendentes pelo bot
-                    </button>
+              
                   </div>
 
                   <div style={card}>

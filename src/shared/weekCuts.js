@@ -44,3 +44,16 @@ export function legacyDeliveryIsCandidate(delivery, cut) {
   const found = String(delivery?.semana || "").match(/\bsemana\s*0*(\d+)\b/i);
   return Boolean(found) && Number(found[1]) === Number(cut?.semana);
 }
+
+/**
+ * Extrai todas as semanas mencionadas numa mesma entrega ("Semana 01, Semana 02").
+ * A semana, isoladamente, NÃO identifica o episódio; o filtro por episodio_id
+ * deve acontecer antes de aplicar este auxiliar.
+ */
+export function deliveryWeekNumbers(value) {
+  const texto = String(value ?? "");
+  const encontrados = [...texto.matchAll(/\bsemana\s*0*(\d+)\b/gi)]
+    .map((item) => Number(item[1]))
+    .filter((n) => Number.isSafeInteger(n) && n > 0 && n <= 1000);
+  return [...new Set(encontrados)];
+}

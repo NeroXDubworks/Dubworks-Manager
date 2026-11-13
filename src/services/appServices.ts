@@ -390,7 +390,7 @@ export interface ChatPreferencia {
   updated_at: string;
 }
 
-export type TipoNotificacaoChat = "mensagem" | "mencao" | "resposta";
+export type TipoNotificacaoChat = "mensagem" | "mencao" | "resposta" | "entrega_semana" | "regravacao_solicitada";
 
 export interface ChatMencao {
   id?: number;
@@ -405,6 +405,10 @@ export interface NotificacaoChat {
   tipo: TipoNotificacaoChat;
   canal_id: string | null;
   mensagem_id: number | null;
+  projeto_id?: number | null;
+  episodio_id?: number | null;
+  entrega_id?: number | null;
+  historico_id?: number | null;
   autor_login: string;
   autor_nome: string;
   titulo: string;
@@ -1702,6 +1706,10 @@ function mapNotificacaoChatDb(item: any): NotificacaoChat {
       item.mensagem_id === null || item.mensagem_id === undefined
         ? null
         : Number(item.mensagem_id),
+    projeto_id: item.projeto_id == null ? null : Number(item.projeto_id),
+    episodio_id: item.episodio_id == null ? null : Number(item.episodio_id),
+    entrega_id: item.entrega_id == null ? null : Number(item.entrega_id),
+    historico_id: item.historico_id == null ? null : Number(item.historico_id),
     autor_login: item.autor_login || "",
     autor_nome: item.autor_nome || "",
     titulo: item.titulo || "",
@@ -2212,7 +2220,8 @@ export async function lerRespostasEntregasViaEdge(
   planilhaEntregasIdOuUrl: string,
   pastaEntregasIdOuUrl = "",
   formEntregasIdOuUrl = "",
-  exigirSemanaEntrega = false
+  exigirSemanaEntrega = false,
+  namespaceResposta = ""
 ): Promise<EntregaProducao[]> {
   const spreadsheetId = extrairGoogleFileId(planilhaEntregasIdOuUrl);
   const folderId = extrairGoogleFolderId(pastaEntregasIdOuUrl);
@@ -2260,7 +2269,8 @@ export async function lerRespostasEntregasViaEdge(
 
   return data.respostas.map((item: any, index: number) => ({
     projeto_id: 0,
-    resposta_id: String(item.id || item.linha || index + 1),
+    // IDs das planilhas são números de linha: prefixar com Form evita colisão entre EPs.
+    resposta_id: (namespaceResposta ? namespaceResposta + ":" : "") + String(item.id || item.linha || index + 1),
     linha: Number(item.linha || index + 2),
     personagem: item.personagem || "",
     dublador: item.dublador || item.nome || item.membro || "",
@@ -2287,7 +2297,7 @@ export async function salvarEntregasProducaoBanco(
   const ids = [...new Set(entregas.map((item) => item.resposta_id))];
   const { data: existentes, error: erroExistentes } = await supabase
     .from("entregas_producao")
-    .select("resposta_id, episodio_id, status, video_url, comentario")
+    .select("resposta_id, episodio_id, episodio_corte_id, status, video_url, comentario")
     .eq("projeto_id", Number(projetoId))
     .in("resposta_id", ids);
 
@@ -2301,6 +2311,7 @@ export async function salvarEntregasProducaoBanco(
   const payload = entregas.map((item) => ({
     projeto_id: Number(projetoId),
     episodio_id: item.episodio_id ?? porId.get(String(item.resposta_id))?.episodio_id ?? null,
+    episodio_corte_id: item.episodio_corte_id ?? porId.get(String(item.resposta_id))?.episodio_corte_id ?? null,
     resposta_id: item.resposta_id,
     linha: item.linha ?? null,
     personagem: item.personagem,
@@ -2349,7 +2360,7 @@ export async function atualizarStatusEntregaBanco(
   avaliadoPor: string,
   comentarioLider?: string
 ): Promise<boolean> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("entregas_producao")
     .update({
       status,
@@ -2358,10 +2369,11 @@ export async function atualizarStatusEntregaBanco(
       data_avaliacao: new Date().toISOString(),
       atualizado_em: new Date().toISOString(),
     })
-    .eq("id", entregaId);
+    .eq("id", entregaId)
+    .select("id");
 
-  if (error) {
-    console.error("Erro ao atualizar status da entrega:", error);
+  if (error || !data?.length) {
+    console.error("Erro ao atualizar status da entrega:", error || "Nenhum registro atualizado");
     return false;
   }
 

@@ -27,6 +27,10 @@ export type ProjetoEpisodio = {
   pasta_cortes_id?: string | null;
   pasta_entregas_id?: string | null;
   pasta_finalizado_id?: string | null;
+  form_entregas_id?: string | null;
+  form_entregas_url?: string | null;
+  planilha_entregas_id?: string | null;
+  planilha_entregas_url?: string | null;
   criado_por?: string | null;
   criado_em?: string | null;
   atualizado_em?: string | null;
@@ -161,6 +165,53 @@ async function moverEstruturaDriveEpisodio(
   return data;
 }
 
+
+/** Prepara/reutiliza o Form exclusivo do episódio e salva seus links sem mexer no Form legado. */
+export async function prepararFormEpisodio(params: {
+  episodio: ProjetoEpisodio;
+  projectName: string;
+  personagens: string[];
+  capaUrl?: string;
+}) {
+  const { data: { session }, error: erroSessao } = await supabase.auth.getSession();
+  if (erroSessao || !session?.access_token) {
+    throw new Error("Sua sessão expirou. Entre novamente na DubWorks.");
+  }
+  if (!params.episodio.pasta_entregas_id) {
+    throw new Error("A pasta de Entregas do episódio não está cadastrada.");
+  }
+  const response = await fetch("/api/forms-episode", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: "Bearer " + session.access_token,
+    },
+    body: JSON.stringify({
+      projectId: params.episodio.projeto_id,
+      episodeId: params.episodio.id,
+      projectName: params.projectName,
+      personagens: params.personagens,
+      capaUrl: params.capaUrl || "",
+    }),
+  });
+  const resultado = await response.json().catch(() => null);
+  if (!response.ok || !resultado?.ok) {
+    throw new Error(resultado?.error || "Não foi possível gerar o Forms deste episódio.");
+  }
+  const formulario = resultado.formEntregas || {};
+  const planilha = resultado.planilhaEntregas || {};
+  const url = (item: any) => String(
+    item.viewUrl || item.formUrl || item.url || item.editUrl || ""
+  ).trim();
+  const atualizado = await atualizarEpisodioProjeto(params.episodio.id, {
+    form_entregas_id: String(formulario.id || "").trim(),
+    form_entregas_url: url(formulario),
+    planilha_entregas_id: String(planilha.id || "").trim(),
+    planilha_entregas_url: url(planilha),
+  });
+  return atualizado;
+}
+
 export async function iniciarProducaoEpisodio(
   episodio: ProjetoEpisodio,
   usuario?: string
@@ -250,6 +301,10 @@ export async function atualizarEpisodioProjeto(
       | "pasta_cortes_id"
       | "pasta_entregas_id"
       | "pasta_finalizado_id"
+      | "form_entregas_id"
+      | "form_entregas_url"
+      | "planilha_entregas_id"
+      | "planilha_entregas_url"
     >
   >
 ) {
@@ -766,9 +821,24 @@ export function resumoEntregasEpisodio(
       .trim()
       .toLocaleLowerCase("pt-BR");
     const envios = porPersonagem.get(chave) || [];
-    const aprovado = envios.some((item) => item.status === "aprovado");
-    const regravacao = envios.some((item) => item.status === "regravacao");
-    const aguardando = envios.some((item) => item.status === "pendente");
+    // Várias submissões da mesma semana representam versões de uma entrega:
+    // considerar apenas a mais recente evita "pendente" e "aprovado" ao mesmo tempo.
+    const atuaisPorCorte = new Map<string, EntregaProducao>();
+    const ordenados = [...envios].sort((a: any, b: any) => {
+      const da = Date.parse(String(a.data_envio || a.criado_em || "")) || 0;
+      const db = Date.parse(String(b.data_envio || b.criado_em || "")) || 0;
+      return da - db || Number(a.id || 0) - Number(b.id || 0);
+    });
+    ordenados.forEach((envio: any) => {
+      const chaveCorte = envio.episodio_corte_id
+        ? "corte:" + envio.episodio_corte_id
+        : "semana:" + String(envio.semana || "").trim().toLocaleLowerCase("pt-BR");
+      atuaisPorCorte.set(chaveCorte, envio);
+    });
+    const atuais = [...atuaisPorCorte.values()];
+    const aprovado = atuais.length > 0 && atuais.every((envio) => envio.status === "aprovado");
+    const regravacao = atuais.some((envio) => envio.status === "regravacao");
+    const aguardando = atuais.some((envio) => envio.status === "pendente");
 
     return {
       ...item,
@@ -776,7 +846,9 @@ export function resumoEntregasEpisodio(
       aprovado,
       regravacao,
       aguardando,
-      pendente: !aprovado,
+      // Só cobrar quem ainda não enviou nada. Quem enviou e aguarda
+      // avaliação é responsabilidade da liderança, não do dublador.
+      pendente: envios.length === 0,
     };
   });
 

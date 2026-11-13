@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { converterDriveParaPreview } from "../services/appServices";
+import { converterDriveParaPreview, atualizarStatusEntregaBanco, carregarParticipantesSemanaBanco, enfileirarLembreteWhatsapp, type ParticipanteSemanaProjeto } from "../services/appServices";
+import { registrarHistoricoEpisodio } from "../services/projectEpisodes";
 import {
   alterarStatusCorte,
-  candidatasLegadasPorCorte,
+  listarEntregasSemEpisodio,
+  vincularEntregaAoEpisodio,
   criarCorteEpisodio,
   listarCortesEpisodio,
   listarEntregasParaCortes,
@@ -12,7 +14,7 @@ import {
   type CorteStatus,
   type EntregaCorte,
 } from "../services/episodeCuts";
-import { cutLabel, formatCutDuration, parseCutDuration, sumCutDurations } from "../shared/weekCuts.js";
+import { cutLabel, deliveryWeekNumbers, formatCutDuration, parseCutDuration, sumCutDurations } from "../shared/weekCuts.js";
 
 type Props = {
   projetoId: number;
@@ -21,8 +23,13 @@ type Props = {
   usuarioNome: string;
   /** Registros da hierarquia anterior criada pela Giovanna, sem migração automática. */
   subdivisoesExistentes?: Array<{ id: number; numero: number; titulo: string; status: string }>;
-  semanasLegadas?: Array<{ semana: number; status?: string }>;
-  onAbrirAcervo?: () => void;
+  onSemanaCriada?: () => Promise<void> | void;
+  onEntregaAvaliada?: () => Promise<void> | void;
+  atualizarChave?: number;
+  podeCobrar?: boolean;
+  nomeProjeto?: string;
+  numeroEpisodio?: number;
+  elencoEpisodio?: Array<{ personagem: string; dublador?: string | null; telefone?: string | null }>;
 };
 
 const painel: React.CSSProperties = {
@@ -47,10 +54,28 @@ const estados: Record<CorteStatus, string> = {
 const statusOpcoes: CorteStatus[] = ["nao_iniciada", "em_andamento", "pausada", "concluida"];
 const inicial = { duracao: "05:00", observacao: "", prazoEm: "", videoBaseUrl: "", trilhaUrl: "" };
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo }: Props) {
+/** Exibe semanas antigas dentro do EP a partir de entregas que JÁ possuem episodio_id correto. */
+function semanasDoEpisodio(cortes: CorteEpisodio[], entregas: EntregaCorte[]): number[] {
+  const numeros = new Set(cortes.map((c) => c.semana));
+  entregas.forEach((e) => {
+    if (e.episodio_corte_id != null) {
+      const corte = cortes.find((c) => c.id === e.episodio_corte_id);
+      if (corte) numeros.add(corte.semana);
+    } else {
+      deliveryWeekNumbers(e.semana).forEach((numero: number) => numeros.add(numero));
+    }
+  });
+  return [...numeros].sort((a, b) => a - b);
+}
+
+
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], onSemanaCriada, onEntregaAvaliada, atualizarChave = 0, podeCobrar = false, nomeProjeto = "", numeroEpisodio = 0, elencoEpisodio = [] }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
-  const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
+  const [entregasSemEpisodio, setEntregasSemEpisodio] = useState<EntregaCorte[]>([]);
+  const [participantesHistoricos, setParticipantesHistoricos] = useState<ParticipanteSemanaProjeto[]>([]);
+  const [semanaSelecionada, setSemanaSelecionada] = useState<number | null>(null);
+  const [entregaSelecionadaId, setEntregaSelecionadaId] = useState<number | null>(null);
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [novo, setNovo] = useState(inicial);
   const [carregando, setCarregando] = useState(true);
@@ -58,14 +83,17 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
   const [erro, setErro] = useState("");
 
   async function recarregar() {
-    const [listaCortes, listaEntregas] = await Promise.all([
+    const [listaCortes, listaEntregas, semEpisodio] = await Promise.all([
       listarCortesEpisodio(projetoId, episodioId),
       listarEntregasParaCortes(projetoId, episodioId),
+      listarEntregasSemEpisodio(projetoId),
     ]);
     setCortes(listaCortes);
     setEntregas(listaEntregas);
-    setSelecionadoId(id =>
-      id && listaCortes.some(item => item.id === id) ? id : listaCortes[0]?.id || null
+    setEntregasSemEpisodio(semEpisodio);
+    const numeros = semanasDoEpisodio(listaCortes, listaEntregas);
+    setSemanaSelecionada(semana =>
+      semana && numeros.includes(semana) ? semana : numeros[0] || null
     );
   }
 
@@ -74,35 +102,60 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     setCarregando(true);
     setCortes([]);
     setEntregas([]);
-    setSelecionadoId(null);
+    setEntregasSemEpisodio([]);
+    setSemanaSelecionada(null);
+    setEntregaSelecionadaId(null);
     setMostrarNovo(false);
     setErro("");
     Promise.all([
       listarCortesEpisodio(projetoId, episodioId),
       listarEntregasParaCortes(projetoId, episodioId),
-    ]).then(([listaCortes, listaEntregas]) => {
+      listarEntregasSemEpisodio(projetoId),
+    ]).then(([listaCortes, listaEntregas, semEpisodio]) => {
       if (!ativo) return;
       setCortes(listaCortes);
       setEntregas(listaEntregas);
-      setSelecionadoId(listaCortes[0]?.id || null);
+      setEntregasSemEpisodio(semEpisodio);
+      setSemanaSelecionada(semanasDoEpisodio(listaCortes, listaEntregas)[0] || null);
     }).catch((e: any) => {
-      if (ativo) setErro(e?.message || "Não foi possível carregar as semanas. Verifique a migração.");
+      if (ativo) setErro(e?.message || "Não foi possível carregar as semanas deste episódio.");
     }).finally(() => { if (ativo) setCarregando(false); });
     return () => { ativo = false; };
-  }, [projetoId, episodioId]);
+  }, [projetoId, episodioId, atualizarChave]);
 
-  const proximaSemana = Math.max(
-    0, ...cortes.map(c => c.semana), ...semanasLegadas.map(s => s.semana)
-  ) + 1;
-  const selecionado = cortes.find(c => c.id === selecionadoId) || null;
-  const entregasVinculadas = useMemo(
-    () => entregas.filter(e => selecionado && e.episodio_corte_id === selecionado.id),
-    [entregas, selecionado]
-  );
-  const pendentesLegadas = useMemo(
-    () => selecionado ? candidatasLegadasPorCorte(entregas, selecionado) : [],
-    [entregas, selecionado]
-  );
+  const semanas = useMemo(() => semanasDoEpisodio(cortes, entregas), [cortes, entregas]);
+  const semanaAtual = semanaSelecionada && semanas.includes(semanaSelecionada)
+    ? semanaSelecionada : semanas[0] || null;
+  const proximaSemana = Math.max(0, ...semanas) + 1;
+  const selecionado = cortes.find(c => c.semana === semanaAtual) || null;
+  const entregasDaSemana = useMemo(() => entregas.filter((e) => {
+    if (semanaAtual === null) return false;
+    if (e.episodio_corte_id != null) {
+      return cortes.some((c) => c.id === e.episodio_corte_id && c.semana === semanaAtual);
+    }
+    return deliveryWeekNumbers(e.semana).includes(semanaAtual);
+  }), [entregas, cortes, semanaAtual]);
+  const entregaEmFoco = entregasDaSemana.find(e => e.id === entregaSelecionadaId)
+    || entregasDaSemana[0] || null;
+
+  // O elenco de "projeto_semanas" não possui episodio_id. Só o exibimos
+  // quando ESTA semana foi identificada pelas entregas vinculadas ao EP e
+  // não existe um corte novo com o mesmo número (caso de EP 02).
+  useEffect(() => {
+    let ativo = true;
+    setParticipantesHistoricos([]);
+    if (semanaAtual == null || selecionado || !entregasDaSemana.length) return;
+    carregarParticipantesSemanaBanco(String(projetoId), semanaAtual)
+      .then((lista) => { if (ativo) setParticipantesHistoricos(lista); })
+      .catch((e) => { if (ativo) console.warn("Não foi possível carregar o elenco histórico:", e); });
+    return () => { ativo = false; };
+  }, [projetoId, episodioId, semanaAtual, selecionado?.id, entregasDaSemana.length]);
+
+  function normalizarPersonagem(value?: string | null) {
+    return String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
+      .toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]/g, "");
+  }
+
 
   async function criar(event: React.FormEvent) {
     event.preventDefault();
@@ -125,7 +178,11 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       setMostrarNovo(false);
       setNovo(inicial);
       await recarregar();
-      setSelecionadoId(criado.id);
+      setSemanaSelecionada(criado.semana);
+      if (onSemanaCriada) {
+        try { await onSemanaCriada(); }
+        catch (erro: any) { setErro("Semana cadastrada, mas o Forms não foi atualizado: " + (erro?.message || "erro de integração")); }
+      }
     } catch (e: any) {
       setErro(e?.message || "Erro ao cadastrar semana.");
     } finally {
@@ -174,18 +231,143 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     }
   }
 
+  async function associarAoEpisodio(entrega: EntregaCorte) {
+    if (!podeEditar || salvando) return;
+    if (!window.confirm(
+      "Associar a gravação de " + (entrega.personagem || entrega.dublador || "participante") +
+      " (" + (entrega.semana || "sem semana") + ") ao episódio selecionado? " +
+      "Isso NÃO apagará a avaliação e não irá alterar as respostas do Google Forms."
+    )) return;
+    setSalvando(true);
+    setErro("");
+    try {
+      await vincularEntregaAoEpisodio({ entregaId: entrega.id, projetoId, episodioId });
+      await registrarHistoricoEpisodio({
+        projetoId, episodioId, tipo: "entrega_legada_associada",
+        descricao: "Entrega histórica associada manualmente: " +
+          (entrega.personagem || entrega.dublador || "participante") + " — " +
+          (entrega.semana || "sem semana") + ".",
+        usuario: usuarioNome, dados: { entrega_id: entrega.id },
+      });
+      await recarregar();
+      if (onEntregaAvaliada) await onEntregaAvaliada();
+    } catch (e: any) {
+      setErro(e?.message || "Falha ao associar gravação ao episódio.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+
+  async function cobrarSemanaAtual() {
+    if (!podeCobrar || semanaAtual == null || salvando) return;
+    // Semanas históricas usam a escala da própria semana; novas usam o elenco do EP.
+    // Nunca inferir que "Semana 01" histórica pertence a outro episódio.
+    const escala = selecionado
+      ? elencoEpisodio.map(p => ({ personagem: p.personagem, dublador: p.dublador, telefone: p.telefone }))
+      : participantesHistoricos.map(p => ({
+          personagem: p.personagem, dublador: p.dublador, telefone: p.telefone_dublador,
+        }));
+    const pendentes = escala.filter(p => {
+      const personagem = normalizarPersonagem(p.personagem);
+      if (!personagem || !p.telefone?.trim() || !p.dublador?.trim()) return false;
+      const jaEnviou = entregasDaSemana.some(e => normalizarPersonagem(e.personagem) === personagem);
+      // Há gravações antigas ainda sem episódio: não cobrar até serem conferidas.
+      const precisaConferir = entregasSemEpisodio.some(e =>
+        normalizarPersonagem(e.personagem) === personagem &&
+        deliveryWeekNumbers(e.semana).includes(semanaAtual)
+      );
+      return !jaEnviou && !precisaConferir;
+    });
+    if (!pendentes.length) {
+      alert("Não há participantes confirmados sem entrega e com telefone nesta semana. Confira as entregas sem EP antes de cobrar.");
+      return;
+    }
+    const ep = "EP " + String(numeroEpisodio).padStart(2, "0");
+    if (!window.confirm(
+      "Enviar lembrete pelo bot para " + pendentes.length + " participante(s) de " +
+      ep + " · " + cutLabel(semanaAtual) + " de " + nomeProjeto + "?"
+    )) return;
+    setSalvando(true);
+    setErro("");
+    try {
+      let enviados = 0;
+      const falhas: string[] = [];
+      for (const item of pendentes) {
+        try {
+          await enfileirarLembreteWhatsapp({
+            projetoId: String(projetoId),
+            semana: semanaAtual,
+            personagem: item.personagem,
+            dublador: item.dublador || "",
+            telefone: item.telefone || "",
+            // Chave única por episódio + semana: não confundir EPs com Semana 01.
+            tipoLembrete: "episodio_semana_pendente_ep" + episodioId,
+            mensagem: "Olá, " + (item.dublador || "tudo bem") +
+              "! Ainda não localizamos sua entrega de " + item.personagem + " no " +
+              ep + " · " + cutLabel(semanaAtual) + " de " + nomeProjeto +
+              ". Se já enviou, avise a produção para conferirmos. 💜",
+          });
+          enviados++;
+        } catch { falhas.push(item.personagem); }
+      }
+      alert("Lembretes enviados à fila: " + enviados +
+        (falhas.length ? ". Não enviados: " + falhas.join(", ") : ""));
+    } catch(e: any) {
+      setErro(e?.message || "Não foi possível enviar lembretes desta semana.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function avaliarEntrega(entrega: EntregaCorte, status: "aprovado" | "regravacao") {
+    if (!podeEditar || salvando) return;
+    const comentario = window.prompt(
+      status === "regravacao"
+        ? "Explique ao dublador o que precisa ser regravado:"
+        : "Observação da aprovação (opcional):",
+      entrega.comentario_lider || ""
+    );
+    if (comentario === null) return;
+    if (status === "regravacao" && !comentario.trim()) {
+      setErro("Informe o motivo e as orientações para solicitar uma regravação.");
+      return;
+    }
+    setSalvando(true);
+    setErro("");
+    try {
+      const salvo = await atualizarStatusEntregaBanco(entrega.id, status, usuarioNome, comentario.trim());
+      if (!salvo) throw new Error("O sistema não confirmou a avaliação da entrega.");
+      await registrarHistoricoEpisodio({
+        projetoId,
+        episodioId,
+        tipo: status === "aprovado" ? "entrega_aprovada" : "regravacao_solicitada",
+        descricao: (status === "aprovado" ? "Entrega aprovada: " : "Regravação solicitada: ") +
+          (entrega.personagem || "Personagem") + " — " + cutLabel(semanaAtual || 1) + ".",
+        usuario: usuarioNome,
+        dados: { entrega_id: entrega.id, corte_id: selecionado?.id || null, comentario: comentario.trim() },
+      });
+      await recarregar();
+      if (onEntregaAvaliada) await onEntregaAvaliada();
+    } catch (e: any) {
+      setErro(e?.message || "Não foi possível avaliar a entrega.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   return (
     <section style={{ ...painel, display: "grid", gap: 14 }} aria-label="Semanas e cortes do episódio">
       <div style={{ display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
         <div>
-          <h3 style={{ color: "#f8fafc", margin: 0 }}>📅 Banco e Semanas · Episódio</h3>
+          <h3 style={{ color: "#f8fafc", margin: 0 }}>📅 Semanas, gravações e avaliações deste episódio</h3>
           <p style={{ ...texto, margin: "6px 0 0" }}>
-            Cada semana é um único corte de duração real. Não altera semanas antigas do projeto.
+            Escolha uma semana para ver as falas, assistir às gravações e avaliar no mesmo lugar. Registros antigos já vinculados a este episódio são exibidos automaticamente.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#c4b5fd", fontWeight: 800 }}>
-            {cortes.length} semana(s) · {formatCutDuration(sumCutDurations(cortes))}
+            {semanas.length} semana(s) · {cortes.length ? formatCutDuration(sumCutDurations(cortes)) : "Duração histórica não cadastrada"}
           </span>
           <button type="button" style={botao} disabled={carregando || salvando} onClick={() => {
             setCarregando(true); setErro("");
@@ -203,100 +385,218 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
           {subdivisoesExistentes.map(item => <div key={item.id} style={{ color: "#cbd5e1", fontSize: 13 }}>{item.titulo || `Item ${item.numero}`} · {item.status}</div>)}
         </div>
       )}
+
       {carregando && <p style={texto}>Carregando semanas e entregas...</p>}
-      {semanasLegadas.length > 0 && (
-        <div style={{ padding: 12, borderRadius: 10, background: "rgba(14,165,233,.08)",
-          border: "1px solid rgba(56,189,248,.25)" }}>
-          <strong style={{ color: "#bae6fd" }}>Semanas anteriores deste projeto</strong>
-          <p style={{ ...texto, margin: "6px 0" }}>
-            As gravações, avaliações e participantes continuam preservados. Como não tinham vínculo direto
-            com episódio, não serão migrados automaticamente nem recadastrados.
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            {semanasLegadas.map(s => (
-              <span key={s.semana} style={{ color: "#e2e8f0", fontSize: 13,
-                padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(148,163,184,.2)" }}>
-                {cutLabel(s.semana)} · {s.status === "concluida" ? "Concluída (anterior)" : "Aberta (anterior)"}
-              </span>
-            ))}
-            {onAbrirAcervo && <button type="button" style={botao} onClick={onAbrirAcervo}>
-              Ver gravações e participantes anteriores
-            </button>}
-          </div>
+      {!carregando && semanas.length === 0 && (
+        <p style={texto}>Nenhuma semana vinculada a este episódio. Cadastre uma semana para iniciar a produção.</p>
+      )}
+      {semanas.length > 0 && (
+        <div role="tablist" aria-label="Semanas deste episódio"
+          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 9 }}>
+          {semanas.map((n) => {
+            const corte = cortes.find((c) => c.semana === n);
+            const quantidade = entregas.filter(e => e.episodio_corte_id != null
+              ? corte?.id === e.episodio_corte_id
+              : deliveryWeekNumbers(e.semana).includes(n)).length;
+            return (
+              <button key={n} type="button" role="tab" aria-selected={semanaAtual === n}
+                onClick={() => { setSemanaSelecionada(n); setEntregaSelecionadaId(null); }}
+                style={{ ...botao, textAlign: "left",
+                  borderColor: semanaAtual === n ? "#a78bfa" : "rgba(139,92,246,.24)",
+                  background: semanaAtual === n ? "rgba(124,58,237,.32)" : "rgba(2,6,23,.4)" }}>
+                <strong style={{ display: "block", fontSize: 15 }}>{cutLabel(n)}</strong>
+                <span style={{ ...texto, color: "#c4b5fd", display: "block", marginTop: 5 }}>
+                  {corte ? formatCutDuration(corte.duracao_segundos) : "Histórico do episódio"}
+                </span>
+                <span style={{ ...texto, display: "block" }}>
+                  {corte ? estados[corte.status] : "Sem corte novo"} · {quantidade} envio(s)
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
-      {!carregando && cortes.length === 0 && semanasLegadas.length === 0 && (
-        <p style={texto}>Nenhuma semana/corte cadastrada neste episódio.</p>
-      )}
-
-      {cortes.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 9 }}>
-          {cortes.map(corte => (
-            <button key={corte.id} type="button" onClick={() => setSelecionadoId(corte.id)}
-              style={{ ...botao, textAlign: "left", borderColor: selecionado?.id === corte.id ? "#a78bfa" : "rgba(139,92,246,.24)", background: selecionado?.id === corte.id ? "rgba(124,58,237,.27)" : "rgba(2,6,23,.4)" }}>
-              <strong style={{ display: "block" }}>{cutLabel(corte.semana)}</strong>
-              <span style={{ ...texto, color: "#c4b5fd" }}>{formatCutDuration(corte.duracao_segundos)}</span>
-              <span style={{ ...texto, display: "block" }}>{estados[corte.status]}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {selecionado && (
-        <div style={{ background: "rgba(2,6,23,.42)", borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
+      {semanaAtual !== null && (
+        <div style={{ background: "rgba(2,6,23,.42)", borderRadius: 12, padding: 14, display: "grid", gap: 14 }}>
           <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <strong style={{ color: "#f8fafc" }}>{cutLabel(selecionado.semana)} — {formatCutDuration(selecionado.duracao_segundos)}</strong>
-              {selecionado.motivo_pausa && <p style={{ ...texto, margin: "4px 0" }}>Pausa: {selecionado.motivo_pausa}</p>}
-              {selecionado.observacao && <p style={{ ...texto, margin: "4px 0" }}>{selecionado.observacao}</p>}
-              {selecionado.prazo_em && <p style={{ ...texto, margin: "4px 0" }}>Prazo: {new Date(selecionado.prazo_em).toLocaleDateString("pt-BR")}</p>}
+              <strong style={{ color: "#f8fafc", fontSize: 17 }}>{cutLabel(semanaAtual)}</strong>
+              <div style={texto}>
+                {selecionado
+                  ? "Corte cadastrado · " + formatCutDuration(selecionado.duracao_segundos)
+                  : "Semana histórica do episódio · gravações e avaliações preservadas"}
+              </div>
+              {selecionado?.motivo_pausa && <p style={texto}>Pausa: {selecionado.motivo_pausa}</p>}
+              {selecionado?.observacao && <p style={texto}>{selecionado.observacao}</p>}
+              {selecionado?.prazo_em && <p style={texto}>Prazo: {new Date(selecionado.prazo_em).toLocaleDateString("pt-BR")}</p>}
             </div>
-            {podeEditar && (
+            {podeEditar && selecionado && (
               <label style={{ ...texto, display: "grid", gap: 4 }}>
-                Situação
-                <select style={{ ...campo, minWidth: 160 }} disabled={salvando} value={selecionado.status}
+                Status do corte
+                <select style={{ ...campo, minWidth: 165 }} disabled={salvando}
+                  value={selecionado.status}
                   onChange={e => void mudarStatus(selecionado, e.target.value as CorteStatus)}>
-                  {statusOpcoes.map(s => <option key={s} value={s}>{estados[s]}</option>)}
+                  {statusOpcoes.map(status => <option key={status} value={status}>{estados[status]}</option>)}
                 </select>
               </label>
             )}
           </div>
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-            {selecionado.video_base_url && <a style={{ color: "#c4b5fd" }} href={selecionado.video_base_url} target="_blank" rel="noopener noreferrer">Vídeo-base ↗</a>}
-            {selecionado.trilha_url && <a style={{ color: "#c4b5fd" }} href={selecionado.trilha_url} target="_blank" rel="noopener noreferrer">Trilha/efeitos ↗</a>}
-          </div>
-
-          <strong style={{ color: "#f8fafc" }}>Entregas vinculadas ({entregasVinculadas.length})</strong>
-          {entregasVinculadas.map(entrega => (
-            <div key={entrega.id} style={{ borderTop: "1px solid rgba(148,163,184,.15)", paddingTop: 10 }}>
-              <strong style={{ color: "#e2e8f0" }}>{entrega.personagem || "Personagem"} — {entrega.dublador || "Sem nome"}</strong>
-              <span style={{ ...texto, marginLeft: 9 }}>{entrega.status || "pendente"}</span>
-              {entrega.telefone && <div style={texto}>Contato: {entrega.telefone}</div>}
-              {entrega.comentario && <div style={texto}>Comentário: {entrega.comentario}</div>}
-              {entrega.comentario_lider && <div style={texto}>Avaliação da liderança: {entrega.comentario_lider}</div>}
-              {entrega.video_url ? (
-                <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                  <iframe src={converterDriveParaPreview(entrega.video_url)} title={`Entrega de ${entrega.personagem || entrega.dublador}`} style={{ border: 0, width: "100%", maxWidth: 550, height: 240, borderRadius: 10 }} allow="fullscreen" />
-                  <a href={entrega.video_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir vídeo original ↗</a>
-                </div>
-              ) : <p style={texto}>Vídeo não localizado no formulário.</p>}
-            </div>
-          ))}
-          {!entregasVinculadas.length && <p style={texto}>Nenhuma entrega vinculada a este corte ainda.</p>}
-
-          {pendentesLegadas.length > 0 && (
-            <div style={{ borderTop: "1px solid rgba(148,163,184,.15)", paddingTop: 10, display: "grid", gap: 8 }}>
-              <strong style={{ color: "#fde68a" }}>Entregas antigas a conferir ({pendentesLegadas.length})</strong>
-              <p style={{ ...texto, margin: 0 }}>Estas respostas já possuem episódio identificado e citam esta semana. Confirme individualmente antes de vinculá-las.</p>
-              {pendentesLegadas.map(entrega => (
-                <div key={entrega.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ color: "#cbd5e1" }}>{entrega.personagem || "Personagem"} — {entrega.dublador || "Sem nome"}</span>
-                  {podeEditar && <button type="button" disabled={salvando} style={botao} onClick={() => void vincular(entrega)}>Vincular a {cutLabel(selecionado.semana)}</button>}
-                </div>
-              ))}
+          {selecionado && (selecionado.video_base_url || selecionado.trilha_url) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {selecionado.video_base_url && (
+                <a style={{ color: "#c4b5fd" }} href={selecionado.video_base_url}
+                  target="_blank" rel="noopener noreferrer">Vídeo-base ↗</a>
+              )}
+              {selecionado.trilha_url && (
+                <a style={{ color: "#c4b5fd" }} href={selecionado.trilha_url}
+                  target="_blank" rel="noopener noreferrer">Trilha/efeitos ↗</a>
+              )}
             </div>
           )}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            <strong style={{ color: "#e2e8f0" }}>Acompanhamento desta semana</strong>
+            {podeCobrar && (
+              <button type="button" style={{ ...botao, borderColor: "rgba(52,211,153,.35)", color: "#a7f3d0" }}
+                disabled={salvando} onClick={() => void cobrarSemanaAtual()}>
+                💬 Cobrar pendentes da semana
+              </button>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "#cbd5e1", fontSize: 13 }}>
+            <span>Recebidas: <strong>{entregasDaSemana.length}</strong></span>
+            <span style={{ color: "#86efac" }}>Aprovadas: <strong>{entregasDaSemana.filter(e => e.status === "aprovado").length}</strong></span>
+            <span style={{ color: "#fde68a" }}>Aguardando análise: <strong>{entregasDaSemana.filter(e => e.status === "pendente").length}</strong></span>
+            <span style={{ color: "#fda4af" }}>Regravações: <strong>{entregasDaSemana.filter(e => e.status === "regravacao").length}</strong></span>
+          </div>
+
+          {participantesHistoricos.length > 0 && (
+            <div style={{ borderRadius: 10, padding: 12, background: "rgba(15,23,42,.55)", border: "1px solid rgba(148,163,184,.15)" }}>
+              <strong style={{ color: "#e2e8f0" }}>
+                Elenco desta semana ({participantesHistoricos.length})
+              </strong>
+              <p style={{ ...texto, margin: "5px 0 10px" }}>
+                Escala original preservada. Entregas e avaliação pertencem ao EP selecionado.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(215px,1fr))", gap: 7 }}>
+                {participantesHistoricos.map((p) => {
+                  const daPessoa = entregasDaSemana.filter(e =>
+                    normalizarPersonagem(e.personagem) === normalizarPersonagem(p.personagem)
+                  );
+                  const statusPessoa = daPessoa.some(e => e.status === "aprovado") ? "Aprovado" :
+                    daPessoa.some(e => e.status === "regravacao") ? "Regravação" :
+                    daPessoa.length ? "Aguardando análise" : "Sem entrega vinculada";
+                  return (
+                    <div key={p.id} style={{ padding: 8, borderRadius: 9, background: "rgba(2,6,23,.55)" }}>
+                      <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 12 }}>{p.personagem}</div>
+                      <div style={texto}>{p.dublador || "Sem dublador"}</div>
+                      <div style={{ ...texto, marginTop: 4,
+                        color: statusPessoa === "Aprovado" ? "#86efac" :
+                          statusPessoa === "Regravação" ? "#fda4af" : "#fde68a" }}>
+                        {statusPessoa}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gap: 7, alignContent: "start" }}>
+              <strong style={{ color: "#f8fafc" }}>Gravações desta semana</strong>
+              {entregasDaSemana.map(entrega => (
+                <button key={entrega.id} type="button" onClick={() => setEntregaSelecionadaId(entrega.id)}
+                  style={{ ...botao, width: "100%", textAlign: "left",
+                    background: entregaEmFoco?.id === entrega.id ? "rgba(37,99,235,.22)" : "rgba(2,6,23,.4)",
+                    borderColor: entregaEmFoco?.id === entrega.id ? "#38bdf8" : "rgba(148,163,184,.16)" }}>
+                  <span style={{ display: "block", fontWeight: 700 }}>
+                    {entrega.personagem || "Personagem"} — {entrega.dublador || "Dublador"}
+                  </span>
+                  <span style={{ ...texto, color: entrega.status === "aprovado" ? "#86efac" : entrega.status === "regravacao" ? "#fda4af" : "#fde68a" }}>
+                    {entrega.status === "aprovado" ? "Aprovado" : entrega.status === "regravacao" ? "Regravação" : "Aguardando análise"}
+                  </span>
+                </button>
+              ))}
+              {!entregasDaSemana.length && <p style={texto}>Nenhuma gravação recebida nesta semana.</p>}
+            </div>
+            <div style={{ background: "rgba(15,23,42,.7)", borderRadius: 12, padding: 13, display: "grid", gap: 9, alignContent: "start" }}>
+              <strong style={{ color: "#f8fafc" }}>Prévia e avaliação</strong>
+              {entregaEmFoco ? (
+                <>
+                  <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
+                    {entregaEmFoco.personagem || "Personagem"} — {entregaEmFoco.dublador || "Dublador"}
+                  </div>
+                  {entregaEmFoco.data_envio && <span style={texto}>Enviado em: {entregaEmFoco.data_envio}</span>}
+                  {entregaEmFoco.telefone && <span style={texto}>Contato: {entregaEmFoco.telefone}</span>}
+                  {entregaEmFoco.comentario && <span style={texto}>Comentário: {entregaEmFoco.comentario}</span>}
+                  {entregaEmFoco.comentario_lider && <span style={texto}>Avaliação: {entregaEmFoco.comentario_lider}</span>}
+                  {entregaEmFoco.video_url ? (
+                    <>
+                      <iframe src={converterDriveParaPreview(entregaEmFoco.video_url)}
+                        title={"Gravação de " + (entregaEmFoco.personagem || entregaEmFoco.dublador || "participante")}
+                        style={{ border: 0, width: "100%", minHeight: 225, borderRadius: 10 }}
+                        allow="fullscreen" />
+                      <a style={{ color: "#c4b5fd" }} href={entregaEmFoco.video_url}
+                        target="_blank" rel="noopener noreferrer">Abrir arquivo original ↗</a>
+                    </>
+                  ) : <span style={texto}>Arquivo não localizado na resposta.</span>}
+                  {podeEditar && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" style={{ ...botao, background: "rgba(22,163,74,.2)" }}
+                        disabled={salvando} onClick={() => void avaliarEntrega(entregaEmFoco, "aprovado")}>
+                        ✓ Aprovar
+                      </button>
+                      <button type="button" style={{ ...botao, background: "rgba(190,24,93,.2)" }}
+                        disabled={salvando} onClick={() => void avaliarEntrega(entregaEmFoco, "regravacao")}>
+                        ↻ Solicitar regravação
+                      </button>
+                      {selecionado && !entregaEmFoco.episodio_corte_id &&
+                        deliveryWeekNumbers(entregaEmFoco.semana).length === 1 && (
+                          <button type="button" style={botao} disabled={salvando}
+                            onClick={() => void vincular(entregaEmFoco)}>
+                            Vincular ao corte
+                          </button>
+                        )}
+                    </div>
+                  )}
+                </>
+              ) : <span style={texto}>Selecione uma gravação para conferir.</span>}
+            </div>
+          </div>
+        </div>
+      )}
+      {entregasSemEpisodio.length > 0 && (
+        <div style={{ borderRadius: 12, padding: 14, border: "1px solid rgba(245,158,11,.3)", background: "rgba(245,158,11,.06)" }}>
+          <strong style={{ color: "#fde68a" }}>
+            Entregas sem episódio definido ({entregasSemEpisodio.length})
+          </strong>
+          <p style={{ ...texto, margin: "7px 0" }}>
+            Estes registros pertencem ao projeto, mas ainda não indicam um EP.
+            Verifique a gravação antes de associar; nenhuma associação é automática.
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {entregasSemEpisodio.map(entrega => (
+              <div key={entrega.id}
+                style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap",
+                  borderRadius: 9, padding: 9, background: "rgba(2,6,23,.45)" }}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong style={{ color: "#e2e8f0", fontSize: 13 }}>
+                    {entrega.personagem || "Personagem"} — {entrega.dublador || "Participante"}
+                  </strong>
+                  <span style={texto}>
+                    {entrega.semana || "Semana não informada"} · {entrega.status === "aprovado" ? "Aprovada" : "Aguardando conferência"}
+                  </span>
+                  {entrega.video_url && <a style={{ color: "#c4b5fd", fontSize: 12 }}
+                    href={entrega.video_url} target="_blank" rel="noopener noreferrer">Conferir gravação ↗</a>}
+                </div>
+                {podeEditar && (
+                  <button type="button" style={botao} disabled={salvando}
+                    onClick={() => void associarAoEpisodio(entrega)}>
+                    Associar ao EP selecionado
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

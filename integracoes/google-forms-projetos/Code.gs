@@ -46,6 +46,9 @@ function doPost(e) {
       case 'preparar_formularios_projeto':
         return json_(prepararFormulariosProjeto_(payload));
 
+      case 'preparar_formulario_episodio':
+        return json_(prepararFormularioEpisodio_(payload));
+
       case 'sincronizar_form_selecao':
         return json_(sincronizarFormulario_(payload, 'selecao'));
 
@@ -243,6 +246,101 @@ function prepararFormulariosProjeto_(payload) {
       entregas: entregas.reused,
     },
   };
+}
+
+
+/**
+ * Um Form de Entregas por episódio, sem renomear ou sobrescrever os antigos.
+ * Reexecutar a ação atualiza o mesmo ID, preservando respostas e planilhas.
+ */
+function prepararFormularioEpisodio_(payload) {
+  const projectName = limparNomeProjeto_(payload.projectName || payload.projetoNome);
+  const numero = Number(payload.episodioNumero);
+  const episodioId = Number(payload.episodioId);
+  const projectId = String(payload.projectId || '').trim();
+  const pastaId = extrairId_(payload.entregasFolderId);
+  const personagens = normalizarLista_(payload.personagensEntregas || []);
+  const semanas = normalizarLista_(payload.semanas || ['Semana 01']);
+  if (!projectName || !projectId || !Number.isInteger(numero) || numero < 1 ||
+      !Number.isInteger(episodioId) || episodioId < 1 || !pastaId || !personagens.length) {
+    throw new Error('Dados insuficientes para gerar o Forms deste episódio.');
+  }
+  const props = PropertiesService.getScriptProperties();
+  const templateId = extrairId_(
+    props.getProperty(DW_CFG.TEMPLATE_DELIVERIES_PROP) || DW_CFG.DEFAULT_TEMPLATE_DELIVERIES_ID
+  );
+  const pasta = DriveApp.getFolderById(pastaId);
+  const chave = 'DUBWORKS_EP_FORM_' + projectId + '_' + episodioId;
+  const salvo = props.getProperty(chave);
+  const idExistente = extrairId_(payload.existingDeliveriesFormId || salvo || '');
+  const epRotulo = 'EP ' + String(numero).padStart(2, '0');
+  const tituloEpisodio = String(payload.episodioTitulo || '').trim();
+  const rotulo = epRotulo + (tituloEpisodio ? ' - ' + tituloEpisodio : '');
+  const titulo = '[Entregas] - ' + projectName + ' - ' + rotulo;
+
+  let form;
+  let reutilizado = false;
+  if (idExistente) {
+    try {
+      form = FormApp.openById(idExistente);
+      reutilizado = true;
+    } catch (err) {
+      console.warn('Form registrado não pôde ser aberto: ' + err);
+    }
+  }
+  if (!form) {
+    const arquivo = DriveApp.getFileById(templateId).makeCopy(titulo, pasta);
+    form = FormApp.openById(arquivo.getId());
+    try { form.removeDestination(); } catch (_) {}
+  }
+
+  prepararFormulario_(form, {
+    tipo: 'entregas', projectName: projectName,
+    personagens: personagens,
+    capaUrl: String(payload.capaUrl || '').trim(),
+  });
+  form.setTitle(titulo);
+  DriveApp.getFileById(form.getId()).setName(titulo);
+  atualizarEpisodiosEntregas_(form, [rotulo]);
+  atualizarSemanasEntregas_(form, semanas.length ? semanas : ['Semana 01']);
+  form.setAcceptingResponses(true);
+
+  const planilha = garantirPlanilhaRespostas_(
+    form, titulo + ' - Respostas', pasta
+  );
+  garantirLocalizacaoFormulario_(form, pasta, planilha);
+  registrarDestinoUpload_(form, pasta, 'entregas', projectName, {
+    projectId: Number(projectId), episodioId: episodioId,
+  });
+  props.setProperty(chave, form.getId());
+  return {
+    ok: true,
+    episodioId: episodioId,
+    episodioNumero: numero,
+    formEntregas: infoFormulario_(form),
+    planilhaEntregas: infoPlanilha_(planilha),
+    reused: reutilizado,
+  };
+}
+
+function atualizarSemanasEntregas_(form, semanas) {
+  const valores = normalizarLista_(semanas);
+  if (!valores.length) return;
+  const aliases = ['semana/corte', 'semana / corte', 'semana'];
+  const items = form.getItems();
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (aliases.indexOf(normalizarTexto_(item.getTitle())) < 0) continue;
+    if (item.getType() === FormApp.ItemType.LIST) {
+      item.asListItem().setChoiceValues(valores).setRequired(true);
+      return;
+    }
+    if (item.getType() === FormApp.ItemType.MULTIPLE_CHOICE) {
+      item.asMultipleChoiceItem().setChoiceValues(valores).setRequired(true);
+      return;
+    }
+  }
+  form.addListItem().setTitle('Semana/Corte').setChoiceValues(valores).setRequired(true);
 }
 
 function obterOuCriarFormulario_(opts) {
@@ -502,7 +600,7 @@ function garantirPlanilhaRespostas_(form, titulo, pasta) {
   return ss;
 }
 
-function registrarDestinoUpload_(form, pasta, tipo, projectName) {
+function registrarDestinoUpload_(form, pasta, tipo, projectName, meta) {
   const props = PropertiesService.getScriptProperties();
   props.setProperty(
     DW_CFG.FORM_UPLOAD_TARGET_PREFIX + form.getId(),
@@ -510,6 +608,8 @@ function registrarDestinoUpload_(form, pasta, tipo, projectName) {
       folderId: pasta.getId(),
       tipo: tipo,
       projectName: projectName,
+      projectId: meta && meta.projectId ? meta.projectId : null,
+      episodioId: meta && meta.episodioId ? meta.episodioId : null,
     })
   );
 
@@ -601,8 +701,76 @@ function onProjectFormSubmit_(e) {
         console.warn('Arquivo do upload não pôde ser organizado: ' + err);
       }
     });
+
+    if (config.episodioId && config.projectId) {
+      try {
+        registrarEntregaEmTempoReal_(e, config, formId);
+      } catch (err) {
+        // A resposta permanece salva no Google Forms/Sheets para sincronização manual.
+        console.error('Notificação da entrega não foi enviada: ' + err);
+      }
+    }
   } catch (err) {
     console.error('Erro no trigger de organização de uploads: ' + err);
+  }
+}
+
+/** Envio imediato via endpoint autenticado, sem divulgar chave de serviço do Supabase. */
+function registrarEntregaEmTempoReal_(e, config, formId) {
+  const props = PropertiesService.getScriptProperties();
+  const url = String(props.getProperty('DUBWORKS_DELIVERY_WEBHOOK_URL') || '').trim();
+  const secret = String(props.getProperty('DUBWORKS_DELIVERY_WEBHOOK_SECRET') || '').trim();
+  if (!url || !secret || !e.response) return;
+
+  const respostas = e.response.getItemResponses().map(function (r) {
+    return {
+      titulo: normalizarTexto_(r.getItem().getTitle()),
+      tipo: String(r.getItem().getType() || '').toUpperCase(),
+      valor: r.getResponse(),
+    };
+  });
+
+  function campo(padrao) {
+    const encontrado = respostas.find(function (item) { return padrao.test(item.titulo); });
+    if (!encontrado) return '';
+    const v = encontrado.valor;
+    return Array.isArray(v) ? v.map(String).join(', ') : String(v || '');
+  }
+  function urlUpload() {
+    const upload = respostas.find(function (item) {
+      return item.tipo.indexOf('FILE_UPLOAD') !== -1 || item.tipo.indexOf('UPLOAD') !== -1;
+    });
+    if (!upload) return campo(/link|v[ií]deo|[aá]udio/);
+    const valor = Array.isArray(upload.valor) ? upload.valor[0] : upload.valor;
+    const texto = String(valor || '').trim();
+    if (/^https?:\/\//i.test(texto)) return texto;
+    const id = extrairId_(texto);
+    return id ? 'https://drive.google.com/file/d/' + id + '/view' : '';
+  }
+  const respostaId = String(e.response.getId() || '').trim();
+  if (!respostaId) return;
+  const resposta = {
+    projectId: config.projectId,
+    episodioId: config.episodioId,
+    formId: formId,
+    respostaId: respostaId,
+    personagem: campo(/personagem/),
+    dublador: campo(/nome|dublador/),
+    telefone: campo(/telefone|whatsapp|n[uú]mero/),
+    semana: campo(/^semana\b|^semena\b|^corte\b/) || campo(/epis[oó]dio/),
+    comentario: campo(/coment[aá]rio|observa[cç][aã]o/),
+    videoUrl: urlUpload(),
+    timestamp: e.response.getTimestamp().toISOString(),
+  };
+  const r = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'x-dubworks-webhook-secret': secret },
+    payload: JSON.stringify(resposta),
+    muteHttpExceptions: true,
+  });
+  if (r.getResponseCode() >= 300) {
+    console.warn('Webhook de entrega HTTP ' + r.getResponseCode());
   }
 }
 
@@ -762,6 +930,15 @@ function lerRespostas_(payload, tipo) {
 
   const headers = valores[0].map(normalizarTexto_);
   const linhas = valores.slice(1);
+  // Forms exclusivos de EP usam IDs nativos, iguais aos do onFormSubmit.
+  // Assim a sincronização manual não duplica entregas recebidas em tempo real.
+  let respostasNativas = [];
+  if (tipo === 'entregas' && payload.formId) {
+    try {
+      respostasNativas = FormApp.openById(extrairId_(payload.formId))
+        .getResponses().map(function (r) { return typeof r.getId === 'function' ? r.getId() : '';  });
+    } catch (_) {}
+  }
 
   const idx = function (aliases) {
     const normalizados = aliases.map(normalizarTexto_);
@@ -795,11 +972,13 @@ function lerRespostas_(payload, tipo) {
     'personagem desejado',
     'escolha o personagem',
   ]);
-  const iSemana = idx([
+  // Distinguir Semana/Corte de Episódio. Para Forms novos ambos existem:
+  // priorizar sempre a semana real; o episódio vem do formulário exclusivo.
+  const iSemanaCorte = idx([
     'semana', 'semana.', 'semana / corte', 'semana/corte',
-    'semena/corte', 'semena / corte',
-    'corte referente a semana', 'episódio', 'episodio',
+    'semena/corte', 'semena / corte', 'corte referente a semana',
   ]);
+  const iSemana = iSemanaCorte >= 0 ? iSemanaCorte : idx(['episódio', 'episodio']);
   const iObservacao = idx(['observação', 'observacao', 'comentário', 'comentario']);
   // Aceita títulos diferentes dos modelos novos e antigos de Forms.
   // A busca por cabeçalhos é tolerante a prefixos/sufixos como "(Opcional)".
@@ -864,7 +1043,7 @@ function lerRespostas_(payload, tipo) {
       : String(urlFallback || '').trim();
 
     respostas.push({
-      id: String(index + 2),
+      id: String(respostasNativas[index] || index + 2),
       linha: index + 2,
       timestamp: valorLinha_(row, iTimestamp),
       nome: valorLinha_(row, iNome),
@@ -964,7 +1143,7 @@ function lerRespostasDiretoDoFormulario_(payload) {
     return {
       // Preserva compatibilidade com as linhas quando a planilha for ligada
       // e as respostas forem exportadas em ordem cronológica.
-      id: String(index + 2),
+      id: String((typeof response.getId === 'function' ? response.getId() : index + 2)),
       linha: index + 2,
       timestamp: timestamp && timestamp.toISOString
         ? timestamp.toISOString()
