@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  parseCutDuration, formatCutDuration, sumCutDurations, cutLabel, legacyDeliveryIsCandidate
+  parseCutDuration, formatCutDuration, sumCutDurations, cutLabel, legacyDeliveryIsCandidate, deliveryWeekNumbers
 } from "../src/shared/weekCuts.js";
 
 test("duração aceita cortes irregulares e rejeita relógios inválidos", () => {
@@ -28,4 +28,14 @@ test("entrega antiga nunca se associa só por texto da semana", () => {
   assert.equal(legacyDeliveryIsCandidate({ episodio_id: null, semana: "Semana 01" }, cut), false);
   assert.equal(legacyDeliveryIsCandidate({ episodio_id: 31, semana: "Semana 02" }, cut), false);
   assert.equal(legacyDeliveryIsCandidate({ episodio_id: 31, episodio_corte_id: 100, semana: "Semana 01" }, cut), false);
+});
+
+test("episódio unificado reconhece semanas de envios históricos sem deduzir o EP", () => {
+  assert.deepEqual(deliveryWeekNumbers("Semana 01, Semana 02"), [1, 2]);
+  assert.deepEqual(deliveryWeekNumbers("Semana 02"), [2]);
+  assert.deepEqual(deliveryWeekNumbers("Semana 02, Semana 02"), [2]);
+  assert.deepEqual(deliveryWeekNumbers("EP 02"), []);
+  assert.deepEqual(deliveryWeekNumbers(""), []);
+  // Dois episódios podem ter Semana 01; a associação exige episodio_id externo.
+  assert.equal(legacyDeliveryIsCandidate({ episodio_id: 1, semana: "Semana 01" }, { episodio_id: 33, semana: 1 }), false);
 });
