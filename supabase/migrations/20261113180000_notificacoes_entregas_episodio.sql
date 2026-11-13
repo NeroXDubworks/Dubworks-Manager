@@ -28,6 +28,20 @@ declare
   v_episodio text;
   v_semana text;
 begin
+  -- Não gerar avisos por importações de planilhas antigas ou registros sem EP.
+  -- Apenas submissões do formulário exclusivo e registrado para o episódio.
+  if new.episodio_id is null
+     or not exists (
+       select 1 from public.projeto_episodios ep
+       where ep.id = new.episodio_id
+         and ep.projeto_id = new.projeto_id
+         and ep.form_entregas_id is not null
+         and new.resposta_id like ep.form_entregas_id || ':%'
+     )
+  then
+    return new;
+  end if;
+
   select p.projeto into v_projeto
   from public.projetos p where p.id = new.projeto_id;
 
@@ -67,3 +81,6 @@ drop trigger if exists dw_notificar_nova_entrega on public.entregas_producao;
 create trigger dw_notificar_nova_entrega
 after insert on public.entregas_producao
 for each row execute function app_private.dw_avisar_nova_entrega();
+
+-- Prevenir chamadas diretas: esta função deve ser executada apenas pelo trigger.
+revoke all on function app_private.dw_avisar_nova_entrega() from public, anon, authenticated;
