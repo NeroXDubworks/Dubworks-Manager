@@ -23,6 +23,7 @@ type Props = {
   subdivisoesExistentes?: Array<{ id: number; numero: number; titulo: string; status: string }>;
   semanasLegadas?: Array<{ semana: number; status?: string }>;
   onAbrirAcervo?: () => void;
+  onSemanaCriada?: () => Promise<void> | void;
 };
 
 const painel: React.CSSProperties = {
@@ -47,7 +48,7 @@ const estados: Record<CorteStatus, string> = {
 const statusOpcoes: CorteStatus[] = ["nao_iniciada", "em_andamento", "pausada", "concluida"];
 const inicial = { duracao: "05:00", observacao: "", prazoEm: "", videoBaseUrl: "", trilhaUrl: "" };
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo }: Props) {
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo, onSemanaCriada }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
@@ -126,6 +127,10 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       setNovo(inicial);
       await recarregar();
       setSelecionadoId(criado.id);
+      if (onSemanaCriada) {
+        try { await onSemanaCriada(); }
+        catch (erro: any) { setErro("Semana cadastrada, mas o Forms não foi atualizado: " + (erro?.message || "erro de integração")); }
+      }
     } catch (e: any) {
       setErro(e?.message || "Erro ao cadastrar semana.");
     } finally {
