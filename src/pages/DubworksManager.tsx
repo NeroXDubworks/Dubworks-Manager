@@ -14027,7 +14027,6 @@ export default function DubworksManager() {
             projeto={projetoPainel}
             usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
             podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
-            semanasLegadas={semanasProjeto}
             episodioInicialId={episodioNotificadoId}
           />
         </section>
