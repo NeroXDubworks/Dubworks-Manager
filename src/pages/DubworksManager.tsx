@@ -14037,6 +14037,8 @@ export default function DubworksManager() {
         projetoPainel &&
         renderAbaSelecaoVisual(projetoPainel)}
 
+      {abaProjeto === "drive" && <DrivePanel />}
+
       {abaProjeto === "atividades" && projetoPainel && (
         <ProjectActivityPanel
           projetoId={Number(projetoPainel.ID)}
