@@ -701,8 +701,76 @@ function onProjectFormSubmit_(e) {
         console.warn('Arquivo do upload não pôde ser organizado: ' + err);
       }
     });
+
+    if (config.episodioId && config.projectId) {
+      try {
+        registrarEntregaEmTempoReal_(e, config, formId);
+      } catch (err) {
+        // A resposta permanece salva no Google Forms/Sheets para sincronização manual.
+        console.error('Notificação da entrega não foi enviada: ' + err);
+      }
+    }
   } catch (err) {
     console.error('Erro no trigger de organização de uploads: ' + err);
+  }
+}
+
+/** Envio imediato via endpoint autenticado, sem divulgar chave de serviço do Supabase. */
+function registrarEntregaEmTempoReal_(e, config, formId) {
+  const props = PropertiesService.getScriptProperties();
+  const url = String(props.getProperty('DUBWORKS_DELIVERY_WEBHOOK_URL') || '').trim();
+  const secret = String(props.getProperty('DUBWORKS_DELIVERY_WEBHOOK_SECRET') || '').trim();
+  if (!url || !secret || !e.response) return;
+
+  const respostas = e.response.getItemResponses().map(function (r) {
+    return {
+      titulo: normalizarTexto_(r.getItem().getTitle()),
+      tipo: String(r.getItem().getType() || '').toUpperCase(),
+      valor: r.getResponse(),
+    };
+  });
+
+  function campo(padrao) {
+    const encontrado = respostas.find(function (item) { return padrao.test(item.titulo); });
+    if (!encontrado) return '';
+    const v = encontrado.valor;
+    return Array.isArray(v) ? v.map(String).join(', ') : String(v || '');
+  }
+  function urlUpload() {
+    const upload = respostas.find(function (item) {
+      return item.tipo.indexOf('FILE_UPLOAD') !== -1 || item.tipo.indexOf('UPLOAD') !== -1;
+    });
+    if (!upload) return campo(/link|v[ií]deo|[aá]udio/);
+    const valor = Array.isArray(upload.valor) ? upload.valor[0] : upload.valor;
+    const texto = String(valor || '').trim();
+    if (/^https?:\/\//i.test(texto)) return texto;
+    const id = extrairId_(texto);
+    return id ? 'https://drive.google.com/file/d/' + id + '/view' : '';
+  }
+  const respostaId = String(e.response.getId() || '').trim();
+  if (!respostaId) return;
+  const resposta = {
+    projectId: config.projectId,
+    episodioId: config.episodioId,
+    formId: formId,
+    respostaId: respostaId,
+    personagem: campo(/personagem/),
+    dublador: campo(/nome|dublador/),
+    telefone: campo(/telefone|whatsapp|n[uú]mero/),
+    semana: campo(/^semana\b|^semena\b|^corte\b/) || campo(/epis[oó]dio/),
+    comentario: campo(/coment[aá]rio|observa[cç][aã]o/),
+    videoUrl: urlUpload(),
+    timestamp: e.response.getTimestamp().toISOString(),
+  };
+  const r = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'x-dubworks-webhook-secret': secret },
+    payload: JSON.stringify(resposta),
+    muteHttpExceptions: true,
+  });
+  if (r.getResponseCode() >= 300) {
+    console.warn('Webhook de entrega HTTP ' + r.getResponseCode());
   }
 }
 
@@ -862,6 +930,15 @@ function lerRespostas_(payload, tipo) {
 
   const headers = valores[0].map(normalizarTexto_);
   const linhas = valores.slice(1);
+  // Forms exclusivos de EP usam IDs nativos, iguais aos do onFormSubmit.
+  // Assim a sincronização manual não duplica entregas recebidas em tempo real.
+  let respostasNativas = [];
+  if (tipo === 'entregas' && payload.formId) {
+    try {
+      respostasNativas = FormApp.openById(extrairId_(payload.formId))
+        .getResponses().map(function (r) { return r.getId(); });
+    } catch (_) {}
+  }
 
   const idx = function (aliases) {
     const normalizados = aliases.map(normalizarTexto_);
@@ -964,7 +1041,7 @@ function lerRespostas_(payload, tipo) {
       : String(urlFallback || '').trim();
 
     respostas.push({
-      id: String(index + 2),
+      id: String(respostasNativas[index] || index + 2),
       linha: index + 2,
       timestamp: valorLinha_(row, iTimestamp),
       nome: valorLinha_(row, iNome),
@@ -1064,7 +1141,7 @@ function lerRespostasDiretoDoFormulario_(payload) {
     return {
       // Preserva compatibilidade com as linhas quando a planilha for ligada
       // e as respostas forem exportadas em ordem cronológica.
-      id: String(index + 2),
+      id: String(response.getId() || index + 2),
       linha: index + 2,
       timestamp: timestamp && timestamp.toISOString
         ? timestamp.toISOString()
