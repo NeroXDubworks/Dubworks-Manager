@@ -3,8 +3,6 @@ import type { ElencoItem, Projeto } from "../types";
 import EpisodeWeeksPanel from "./EpisodeWeeksPanel";
 import { listarCortesEpisodio } from "../services/episodeCuts";
 import {
-  enfileirarLembreteWhatsapp,
-  criarAtualizarFormulariosProjeto,
   lerRespostasEntregasViaEdge,
   carregarEntregasProducaoBanco,
   salvarEntregasProducaoBanco,
@@ -333,105 +331,6 @@ export default function ProjectEpisodesPanel({
       alert("Erro ao sincronizar entregas: " + mensagem);
     } finally {
       setSincronizandoEntregasEpisodio(false);
-    }
-  }
-
-  async function sincronizarFormsEpisodios(lista: ProjetoEpisodio[]) {
-    const links = extrairLinksDrive(projeto.Observacoes || "");
-    const respostasSelecaoFolderId = extrairGoogleFolderId(
-      links.respostasSelecao || ""
-    );
-    const entregasFolderId = extrairGoogleFolderId(
-      links.entregasProjeto || ""
-    );
-
-    if (!respostasSelecaoFolderId || !entregasFolderId) {
-      throw new Error(
-        "A estrutura do Drive do projeto ainda não possui as pastas necessárias para sincronizar os Forms."
-      );
-    }
-
-    const personagensEntregas = Array.from(
-      new Set(
-        (projeto.Elenco || [])
-          .map((item) => String(item.personagem || "").trim())
-          .filter(Boolean)
-      )
-    );
-    const personagensSelecao = Array.from(
-      new Set(
-        (projeto.Elenco || [])
-          .filter((item) => item.em_selecao !== false)
-          .map((item) => String(item.personagem || "").trim())
-          .filter(Boolean)
-      )
-    );
-    const episodiosForm = [...lista]
-      .sort((a, b) => a.numero - b.numero)
-      .map(
-        (item) =>
-          `EP ${String(item.numero).padStart(2, "0")} - ${item.titulo || "Sem título"}`
-      );
-
-    const retorno = await criarAtualizarFormulariosProjeto({
-      projectId: projeto.ID,
-      projectName: projeto.Projeto,
-      projectType: projeto.Tipo || "Projeto",
-      capaUrl: projeto.Capa_URL || "",
-      respostasSelecaoFolderId,
-      entregasFolderId,
-      falasTesteFolderId: extrairGoogleFolderId(links.falasTeste || ""),
-      cortesProjetoFolderId: extrairGoogleFolderId(links.cortesProjeto || ""),
-      personagensSelecao,
-      personagensEntregas,
-      elenco: projeto.Elenco || [],
-      episodios: episodiosForm,
-      existingSelectionFormId: links.formSelecaoId || extrairGoogleFileId(links.formSelecao || ""),
-      existingDeliveriesFormId: links.formEntregasId || extrairGoogleFileId(links.formEntregas || ""),
-    });
-
-    const lerUrl = (valor: any) =>
-      String(
-        valor?.viewUrl ||
-          valor?.formUrl ||
-          valor?.url ||
-          valor?.editUrl ||
-          valor ||
-          ""
-      ).trim();
-
-    const novosLinks = {
-      ...links,
-      // O link público é usado pelos dubladores; o ID interno evita
-      // a criação de cópias do Form ao atualizar episódios e escalações.
-      formSelecaoId: String(
-        retorno?.formSelecao?.id || links.formSelecaoId || extrairGoogleFileId(links.formSelecao || "")
-      ),
-      formEntregasId: String(
-        retorno?.formEntregas?.id || links.formEntregasId || extrairGoogleFileId(links.formEntregas || "")
-      ),
-      formSelecao:
-        lerUrl(retorno?.formSelecao) || links.formSelecao || "",
-      formEntregas:
-        lerUrl(retorno?.formEntregas) || links.formEntregas || "",
-      planilhaSelecao:
-        lerUrl(retorno?.planilhaSelecao) || links.planilhaSelecao || "",
-      planilhaEntregas:
-        lerUrl(retorno?.planilhaEntregas) || links.planilhaEntregas || "",
-    };
-
-    const observacoes = salvarLinksDriveEmObservacoes(
-      projeto.Observacoes || "",
-      novosLinks
-    );
-
-    if (observacoes !== (projeto.Observacoes || "")) {
-      const ok = await atualizarObservacoesProjetoBanco(projeto.ID, observacoes);
-      if (!ok) {
-        throw new Error(
-          "Os Forms foram sincronizados, mas os links não puderam ser salvos no projeto."
-        );
-      }
     }
   }
 
@@ -773,66 +672,6 @@ export default function ProjectEpisodesPanel({
     } catch (e: any) {
       alert(e?.message || "Não foi possível iniciar a produção.");
     }
-  }
-
-  async function cobrarPendentes() {
-    if (!episodio) return;
-
-    const pendentes = resumo.situacoes.filter(
-      (item) => item.pendente && item.telefone?.trim()
-    );
-
-    if (!pendentes.length) {
-      alert("Não há dubladores pendentes com telefone cadastrado.");
-      return;
-    }
-
-    if (
-      !window.confirm(
-        "Enviar cobrança pelo bot para " +
-          pendentes.length +
-          " pendente(s) do EP " +
-          String(episodio.numero).padStart(2, "0") +
-          "?"
-      )
-    ) {
-      return;
-    }
-
-    let enviados = 0;
-    let falhas = 0;
-
-    for (const item of pendentes) {
-      try {
-        await enfileirarLembreteWhatsapp({
-          projetoId: projeto.ID,
-          semana: episodio.numero,
-          personagem: item.personagem,
-          dublador: item.dublador || "",
-          telefone: item.telefone || "",
-          tipoLembrete: "episodio_pendente",
-          mensagem:
-            "Olá, " +
-            (item.dublador || "tudo bem") +
-            "! Passando para lembrar que a entrega de " +
-            item.personagem +
-            " no episódio " +
-            String(episodio.numero).padStart(2, "0") +
-            " de " +
-            projeto.Projeto +
-            " ainda está pendente. Se já enviou, pode desconsiderar esta mensagem. 💜",
-        });
-        enviados += 1;
-      } catch {
-        falhas += 1;
-      }
-    }
-
-    alert(
-      "Cobrança colocada na fila. Enviados: " +
-        enviados +
-        (falhas ? " • Falhas: " + falhas : "")
-    );
   }
 
   return (
