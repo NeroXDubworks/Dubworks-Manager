@@ -235,6 +235,12 @@ export default function DubworksManager() {
   const [senha, setSenha] = useState("");
   const [erroLogin, setErroLogin] = useState("");
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null);
+  // Estatística por episódio, não pelo status global do projeto.
+  const [episodiosFinalizadosProjeto, setEpisodiosFinalizadosProjeto] = useState<{
+    projetoId: string;
+    total: number | null;
+  } | null>(null);
+  const [revisaoEpisodios, setRevisaoEpisodios] = useState(0);
   const [rascunho, setRascunho] = useState<Projeto | null>(null);
   const [mostrarNovoProjeto, setMostrarNovoProjeto] = useState(false);
   const [mostrarUsuarios, setMostrarUsuarios] = useState(false);
@@ -3501,6 +3507,27 @@ export default function DubworksManager() {
   const projetoPainel = selecionado || null;
 
   useEffect(() => {
+    if (!projetoPainel) return;
+    const projetoId = String(projetoPainel.ID);
+    let ativo = true;
+    void supabase.from("projeto_episodios")
+      .select("id", { count: "exact", head: true })
+      .eq("projeto_id", Number(projetoId))
+      .eq("status", "finalizado")
+      .is("parent_id", null)
+      .then(({ count, error }) => {
+        if (!ativo) return;
+        if (error) {
+          console.error("Falha ao contar episódios finalizados:", error);
+          setEpisodiosFinalizadosProjeto({ projetoId, total: null });
+          return;
+        }
+        setEpisodiosFinalizadosProjeto({ projetoId, total: count ?? 0 });
+      });
+    return () => { ativo = false; };
+  }, [projetoPainel?.ID, revisaoEpisodios]);
+
+  useEffect(() => {
     if (typeof window === "undefined" || !projetos.length) return;
     const idUrl = new URLSearchParams(window.location.search).get("projeto");
     if (!idUrl || selecionadoId) return;
@@ -3587,10 +3614,6 @@ export default function DubworksManager() {
       return total + resumo.testes + resumo.entregas;
     }, 0);
 
-    const finalizados = baseProjetos.filter((projeto) =>
-      normalizar(projeto.Status || "").includes("final")
-    ).length;
-
     const registros = baseProjetos.reduce(
       (total, projeto) => total + contarRegistros(projeto),
       0
@@ -3609,7 +3632,6 @@ export default function DubworksManager() {
     return {
       membrosElenco,
       videosTestes,
-      finalizados,
       registros,
       progresso,
     };
@@ -13291,7 +13313,18 @@ export default function DubworksManager() {
             <>
               <MiniStat icon="👥" value={String(estatisticasCards.membrosElenco)} label="Membros no Elenco" color="#3b82f6" />
               <MiniStat icon="🎙️" value={String(estatisticasCards.videosTestes)} label="Vídeos/Testes" color="#8b5cf6" />
-              <MiniStat icon="🎬" value={String(estatisticasCards.finalizados).padStart(2, "0")} label="Episódios Finalizados" color="#22c55e" />
+              <MiniStat
+                icon="🎬"
+                value={
+                  episodiosFinalizadosProjeto?.projetoId === String(projetoPainel.ID)
+                    ? episodiosFinalizadosProjeto.total === null
+                      ? "—"
+                      : String(episodiosFinalizadosProjeto.total).padStart(2, "0")
+                    : "…"
+                }
+                label="Episódios Finalizados"
+                color="#22c55e"
+              />
               <MiniStat icon="🕒" value={String(estatisticasCards.registros).padStart(2, "0")} label="Registros Semanais" color="#f97316" />
               <MiniStat icon="📈" value={`${estatisticasCards.progresso}%`} label="Progresso Geral" color="#14b8a6" />
             </>
@@ -13468,6 +13501,7 @@ export default function DubworksManager() {
             podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
             podeCobrar={usuarioLogado?.cargo === "diretoria"}
             episodioInicialId={episodioNotificadoId}
+            onStatusAtualizado={() => setRevisaoEpisodios((atual) => atual + 1)}
           />
         </section>
       )}
