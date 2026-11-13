@@ -44,6 +44,7 @@ type Props = {
   podeEditar?: boolean;
   podeCobrar?: boolean;
   episodioInicialId?: number | null;
+  onStatusAtualizado?: () => void;
 };
 
 const card: React.CSSProperties = {
@@ -132,6 +133,7 @@ export default function ProjectEpisodesPanel({
   podeEditar = false,
   podeCobrar = false,
   episodioInicialId,
+  onStatusAtualizado,
 }: Props) {
   const [episodios, setEpisodios] = useState<ProjetoEpisodio[]>([]);
   const [episodioId, setEpisodioId] = useState<number | null>(null);
@@ -644,6 +646,7 @@ export default function ProjectEpisodesPanel({
         dataConclusao: dataReal || undefined,
         observacao: observacao || undefined,
       });
+      onStatusAtualizado?.();
       await recarregarEpisodios(episodio.id);
       await recarregarDetalhes(episodio.id);
     } catch (e: any) {
@@ -657,6 +660,7 @@ export default function ProjectEpisodesPanel({
 
     try {
       await reabrirEpisodioProjeto(episodio, usuarioNome);
+      onStatusAtualizado?.();
       await recarregarEpisodios(episodio.id);
       await recarregarDetalhes(episodio.id);
     } catch (e: any) {
