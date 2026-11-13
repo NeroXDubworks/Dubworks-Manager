@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { converterDriveParaPreview, atualizarStatusEntregaBanco } from "../services/appServices";
+import { converterDriveParaPreview, atualizarStatusEntregaBanco, carregarParticipantesSemanaBanco, type ParticipanteSemanaProjeto } from "../services/appServices";
 import { registrarHistoricoEpisodio } from "../services/projectEpisodes";
 import {
   alterarStatusCorte,
@@ -69,6 +69,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [entregasSemEpisodio, setEntregasSemEpisodio] = useState<EntregaCorte[]>([]);
+  const [participantesHistoricos, setParticipantesHistoricos] = useState<ParticipanteSemanaProjeto[]>([]);
   const [semanaSelecionada, setSemanaSelecionada] = useState<number | null>(null);
   const [entregaSelecionadaId, setEntregaSelecionadaId] = useState<number | null>(null);
   const [mostrarNovo, setMostrarNovo] = useState(false);
@@ -132,6 +133,25 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
   }), [entregas, cortes, semanaAtual]);
   const entregaEmFoco = entregasDaSemana.find(e => e.id === entregaSelecionadaId)
     || entregasDaSemana[0] || null;
+
+  // O elenco de "projeto_semanas" não possui episodio_id. Só o exibimos
+  // quando ESTA semana foi identificada pelas entregas vinculadas ao EP e
+  // não existe um corte novo com o mesmo número (caso de EP 02).
+  useEffect(() => {
+    let ativo = true;
+    setParticipantesHistoricos([]);
+    if (semanaAtual == null || selecionado || !entregasDaSemana.length) return;
+    carregarParticipantesSemanaBanco(String(projetoId), semanaAtual)
+      .then((lista) => { if (ativo) setParticipantesHistoricos(lista); })
+      .catch((e) => { if (ativo) console.warn("Não foi possível carregar o elenco histórico:", e); });
+    return () => { ativo = false; };
+  }, [projetoId, episodioId, semanaAtual, selecionado?.id, entregasDaSemana.length]);
+
+  function normalizarPersonagem(value?: string | null) {
+    return String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g, "")
+      .toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]/g, "");
+  }
+
 
   async function criar(event: React.FormEvent) {
     event.preventDefault();
@@ -373,6 +393,38 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
             <span style={{ color: "#fde68a" }}>Aguardando análise: <strong>{entregasDaSemana.filter(e => e.status === "pendente").length}</strong></span>
             <span style={{ color: "#fda4af" }}>Regravações: <strong>{entregasDaSemana.filter(e => e.status === "regravacao").length}</strong></span>
           </div>
+
+          {participantesHistoricos.length > 0 && (
+            <div style={{ borderRadius: 10, padding: 12, background: "rgba(15,23,42,.55)", border: "1px solid rgba(148,163,184,.15)" }}>
+              <strong style={{ color: "#e2e8f0" }}>
+                Elenco desta semana ({participantesHistoricos.length})
+              </strong>
+              <p style={{ ...texto, margin: "5px 0 10px" }}>
+                Escala original preservada. Entregas e avaliação pertencem ao EP selecionado.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(215px,1fr))", gap: 7 }}>
+                {participantesHistoricos.map((p) => {
+                  const daPessoa = entregasDaSemana.filter(e =>
+                    normalizarPersonagem(e.personagem) === normalizarPersonagem(p.personagem)
+                  );
+                  const statusPessoa = daPessoa.some(e => e.status === "aprovado") ? "Aprovado" :
+                    daPessoa.some(e => e.status === "regravacao") ? "Regravação" :
+                    daPessoa.length ? "Aguardando análise" : "Sem entrega vinculada";
+                  return (
+                    <div key={p.id} style={{ padding: 8, borderRadius: 9, background: "rgba(2,6,23,.55)" }}>
+                      <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: 12 }}>{p.personagem}</div>
+                      <div style={texto}>{p.dublador || "Sem dublador"}</div>
+                      <div style={{ ...texto, marginTop: 4,
+                        color: statusPessoa === "Aprovado" ? "#86efac" :
+                          statusPessoa === "Regravação" ? "#fda4af" : "#fde68a" }}>
+                        {statusPessoa}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: 14 }}>
             <div style={{ display: "grid", gap: 7, alignContent: "start" }}>
               <strong style={{ color: "#f8fafc" }}>Gravações desta semana</strong>
