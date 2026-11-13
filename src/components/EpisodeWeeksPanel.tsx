@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { converterDriveParaPreview } from "../services/appServices";
+import { converterDriveParaPreview, atualizarStatusEntregaBanco } from "../services/appServices";
+import { registrarHistoricoEpisodio } from "../services/projectEpisodes";
 import {
   alterarStatusCorte,
   candidatasLegadasPorCorte,
@@ -24,6 +25,7 @@ type Props = {
   semanasLegadas?: Array<{ semana: number; status?: string }>;
   onAbrirAcervo?: () => void;
   onSemanaCriada?: () => Promise<void> | void;
+  onEntregaAvaliada?: () => Promise<void> | void;
 };
 
 const painel: React.CSSProperties = {
@@ -48,7 +50,7 @@ const estados: Record<CorteStatus, string> = {
 const statusOpcoes: CorteStatus[] = ["nao_iniciada", "em_andamento", "pausada", "concluida"];
 const inicial = { duracao: "05:00", observacao: "", prazoEm: "", videoBaseUrl: "", trilhaUrl: "" };
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo, onSemanaCriada }: Props) {
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo, onSemanaCriada, onEntregaAvaliada }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
   const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
@@ -179,6 +181,42 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     }
   }
 
+  async function avaliarEntrega(entrega: EntregaCorte, status: "aprovado" | "regravacao") {
+    if (!podeEditar || salvando) return;
+    const comentario = window.prompt(
+      status === "regravacao"
+        ? "Explique ao dublador o que precisa ser regravado:"
+        : "Observação da aprovação (opcional):",
+      entrega.comentario_lider || ""
+    );
+    if (comentario === null) return;
+    if (status === "regravacao" && !comentario.trim()) {
+      setErro("Informe o motivo e as orientações para solicitar uma regravação.");
+      return;
+    }
+    setSalvando(true);
+    setErro("");
+    try {
+      const salvo = await atualizarStatusEntregaBanco(entrega.id, status, usuarioNome, comentario.trim());
+      if (!salvo) throw new Error("O sistema não confirmou a avaliação da entrega.");
+      await registrarHistoricoEpisodio({
+        projetoId,
+        episodioId,
+        tipo: status === "aprovado" ? "entrega_aprovada" : "regravacao_solicitada",
+        descricao: (status === "aprovado" ? "Entrega aprovada: " : "Regravação solicitada: ") +
+          (entrega.personagem || "Personagem") + " — " + cutLabel(selecionado?.semana || 1) + ".",
+        usuario: usuarioNome,
+        dados: { entrega_id: entrega.id, corte_id: selecionado?.id, comentario: comentario.trim() },
+      });
+      await recarregar();
+      if (onEntregaAvaliada) await onEntregaAvaliada();
+    } catch (e: any) {
+      setErro(e?.message || "Não foi possível avaliar a entrega.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   return (
     <section style={{ ...painel, display: "grid", gap: 14 }} aria-label="Semanas e cortes do episódio">
       <div style={{ display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
@@ -280,6 +318,19 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
               {entrega.telefone && <div style={texto}>Contato: {entrega.telefone}</div>}
               {entrega.comentario && <div style={texto}>Comentário: {entrega.comentario}</div>}
               {entrega.comentario_lider && <div style={texto}>Avaliação da liderança: {entrega.comentario_lider}</div>}
+              {entrega.data_envio && <div style={texto}>Enviado em: {entrega.data_envio}</div>}
+              {podeEditar && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  <button type="button" style={{ ...botao, background: entrega.status === "aprovado" ? "rgba(22,163,74,.2)" : "rgba(30,83,60,.65)" }}
+                    disabled={salvando} onClick={() => void avaliarEntrega(entrega, "aprovado")}>
+                    ✓ Aprovar entrega
+                  </button>
+                  <button type="button" style={{ ...botao, background: "rgba(190,24,93,.18)", borderColor: "rgba(251,113,133,.4)" }}
+                    disabled={salvando} onClick={() => void avaliarEntrega(entrega, "regravacao")}>
+                    ↻ Solicitar regravação
+                  </button>
+                </div>
+              )}
               {entrega.video_url ? (
                 <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
                   <iframe src={converterDriveParaPreview(entrega.video_url)} title={`Entrega de ${entrega.personagem || entrega.dublador}`} style={{ border: 0, width: "100%", maxWidth: 550, height: 240, borderRadius: 10 }} allow="fullscreen" />
