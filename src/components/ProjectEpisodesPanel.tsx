@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { ElencoItem, Projeto, ProjetoSemana } from "../types";
+import type { ElencoItem, Projeto } from "../types";
 import EpisodeWeeksPanel from "./EpisodeWeeksPanel";
 import { listarCortesEpisodio } from "../services/episodeCuts";
 import {
@@ -44,8 +44,6 @@ type Props = {
   projeto: Projeto;
   usuarioNome?: string;
   podeEditar?: boolean;
-  semanasLegadas?: ProjetoSemana[];
-  onAbrirAcervo?: () => void;
   episodioInicialId?: number | null;
 };
 
@@ -133,8 +131,6 @@ export default function ProjectEpisodesPanel({
   projeto,
   usuarioNome = "Sistema",
   podeEditar = false,
-  semanasLegadas = [],
-  onAbrirAcervo,
   episodioInicialId,
 }: Props) {
   const [episodios, setEpisodios] = useState<ProjetoEpisodio[]>([]);
@@ -145,6 +141,7 @@ export default function ProjectEpisodesPanel({
   const [historico, setHistorico] = useState<EpisodioHistorico[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [sincronizandoEntregasEpisodio, setSincronizandoEntregasEpisodio] = useState(false);
+  const [versaoEntregas, setVersaoEntregas] = useState(0);
   const [erro, setErro] = useState("");
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [novo, setNovo] = useState({
@@ -315,6 +312,7 @@ export default function ProjectEpisodesPanel({
       if (!ok) throw new Error("Não foi possível salvar as respostas no Supabase.");
 
       await recarregarDetalhes(episodio.id);
+      setVersaoEntregas((v) => v + 1);
       const desteEpisodio = respostasVinculadas.filter(
         (item) => item.episodio_id === episodio.id
       ).length;
@@ -1124,8 +1122,7 @@ export default function ProjectEpisodesPanel({
                 podeEditar={podeEditar}
                 usuarioNome={usuarioNome}
                 subdivisoesExistentes={episodios.filter(item => item.parent_id === episodio.id)}
-                semanasLegadas={episodiosPrincipais.length === 1 ? semanasLegadas : []}
-                onAbrirAcervo={onAbrirAcervo}
+                atualizarChave={versaoEntregas}
                 onEntregaAvaliada={async () => { await recarregarDetalhes(episodio.id); }}
                 onSemanaCriada={async () => {
                   if (!episodio.form_entregas_id) return;
@@ -1345,85 +1342,6 @@ export default function ProjectEpisodesPanel({
                 className="dw-episode-bottom-grid"
               >
                 <div style={{ display: "grid", gap: 14 }}>
-                  <div style={card}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                        alignItems: "center",
-                      }}
-                    >
-                      <strong style={{ color: "#f8fafc" }}>
-                        Entregas do episódio
-                      </strong>
-                      <span style={{ color: "#94a3b8", fontSize: 12 }}>
-                        {resumo.entregaram}/{resumo.previstos} receberam
-                      </span>
-                    </div>
-
-                    <div
-                      style={{
-                        height: 8,
-                        borderRadius: 999,
-                        background: "rgba(148,163,184,.12)",
-                        overflow: "hidden",
-                        margin: "10px 0 14px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: resumo.progressoRecebimento + "%",
-                          height: "100%",
-                          background:
-                            "linear-gradient(90deg,#7c3aed,#8b5cf6)",
-                        }}
-                      />
-                    </div>
-
-                    <div style={{ display: "grid", gap: 7 }}>
-                      {entregas.slice(0, 8).map((entrega: any) => (
-                        <div
-                          key={entrega.id}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 1fr auto",
-                            gap: 10,
-                            padding: 9,
-                            borderRadius: 9,
-                            background: "rgba(2,6,23,.42)",
-                          }}
-                        >
-                          <span style={{ color: "#e2e8f0" }}>
-                            {entrega.personagem || "Personagem"}
-                          </span>
-                          <span style={{ color: "#94a3b8" }}>
-                            {entrega.dublador || "—"}
-                          </span>
-                          <span
-                            style={{
-                              color:
-                                entrega.status === "aprovado"
-                                  ? "#86efac"
-                                  : entrega.status === "regravacao"
-                                  ? "#fda4af"
-                                  : "#fde68a",
-                              fontSize: 12,
-                              fontWeight: 800,
-                            }}
-                          >
-                            {entrega.status || "pendente"}
-                          </span>
-                        </div>
-                      ))}
-                      {!entregas.length && (
-                        <span style={{ color: "#64748b" }}>
-                          Nenhuma entrega vinculada a este episódio.
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
                   <div style={card}>
                     <strong style={{ color: "#f8fafc" }}>
                       Seleções do episódio
