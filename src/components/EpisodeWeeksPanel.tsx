@@ -301,7 +301,8 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
             personagem: item.personagem,
             dublador: item.dublador || "",
             telefone: item.telefone || "",
-            tipoLembrete: "episodio_semana_pendente",
+            // Chave única por episódio + semana: não confundir EPs com Semana 01.
+            tipoLembrete: "episodio_semana_pendente_ep" + episodioId,
             mensagem: "Olá, " + (item.dublador || "tudo bem") +
               "! Ainda não localizamos sua entrega de " + item.personagem + " no " +
               ep + " · " + cutLabel(semanaAtual) + " de " + nomeProjeto +
