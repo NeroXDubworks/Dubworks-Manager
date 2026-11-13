@@ -4,7 +4,8 @@ import { converterDriveParaPreview, atualizarStatusEntregaBanco } from "../servi
 import { registrarHistoricoEpisodio } from "../services/projectEpisodes";
 import {
   alterarStatusCorte,
-  candidatasLegadasPorCorte,
+  listarEntregasSemEpisodio,
+  vincularEntregaAoEpisodio,
   criarCorteEpisodio,
   listarCortesEpisodio,
   listarEntregasParaCortes,
@@ -13,7 +14,7 @@ import {
   type CorteStatus,
   type EntregaCorte,
 } from "../services/episodeCuts";
-import { cutLabel, formatCutDuration, parseCutDuration, sumCutDurations } from "../shared/weekCuts.js";
+import { cutLabel, deliveryWeekNumbers, formatCutDuration, parseCutDuration, sumCutDurations } from "../shared/weekCuts.js";
 
 type Props = {
   projetoId: number;
@@ -22,8 +23,6 @@ type Props = {
   usuarioNome: string;
   /** Registros da hierarquia anterior criada pela Giovanna, sem migração automática. */
   subdivisoesExistentes?: Array<{ id: number; numero: number; titulo: string; status: string }>;
-  semanasLegadas?: Array<{ semana: number; status?: string }>;
-  onAbrirAcervo?: () => void;
   onSemanaCriada?: () => Promise<void> | void;
   onEntregaAvaliada?: () => Promise<void> | void;
 };
@@ -50,10 +49,27 @@ const estados: Record<CorteStatus, string> = {
 const statusOpcoes: CorteStatus[] = ["nao_iniciada", "em_andamento", "pausada", "concluida"];
 const inicial = { duracao: "05:00", observacao: "", prazoEm: "", videoBaseUrl: "", trilhaUrl: "" };
 
-export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], semanasLegadas = [], onAbrirAcervo, onSemanaCriada, onEntregaAvaliada }: Props) {
+/** Exibe semanas antigas dentro do EP a partir de entregas que JÁ possuem episodio_id correto. */
+function semanasDoEpisodio(cortes: CorteEpisodio[], entregas: EntregaCorte[]): number[] {
+  const numeros = new Set(cortes.map((c) => c.semana));
+  entregas.forEach((e) => {
+    if (e.episodio_corte_id != null) {
+      const corte = cortes.find((c) => c.id === e.episodio_corte_id);
+      if (corte) numeros.add(corte.semana);
+    } else {
+      deliveryWeekNumbers(e.semana).forEach((numero: number) => numeros.add(numero));
+    }
+  });
+  return [...numeros].sort((a, b) => a - b);
+}
+
+
+export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, usuarioNome, subdivisoesExistentes = [], onSemanaCriada, onEntregaAvaliada }: Props) {
   const [cortes, setCortes] = useState<CorteEpisodio[]>([]);
   const [entregas, setEntregas] = useState<EntregaCorte[]>([]);
-  const [selecionadoId, setSelecionadoId] = useState<number | null>(null);
+  const [entregasSemEpisodio, setEntregasSemEpisodio] = useState<EntregaCorte[]>([]);
+  const [semanaSelecionada, setSemanaSelecionada] = useState<number | null>(null);
+  const [entregaSelecionadaId, setEntregaSelecionadaId] = useState<number | null>(null);
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [novo, setNovo] = useState(inicial);
   const [carregando, setCarregando] = useState(true);
@@ -61,14 +77,17 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
   const [erro, setErro] = useState("");
 
   async function recarregar() {
-    const [listaCortes, listaEntregas] = await Promise.all([
+    const [listaCortes, listaEntregas, semEpisodio] = await Promise.all([
       listarCortesEpisodio(projetoId, episodioId),
       listarEntregasParaCortes(projetoId, episodioId),
+      listarEntregasSemEpisodio(projetoId),
     ]);
     setCortes(listaCortes);
     setEntregas(listaEntregas);
-    setSelecionadoId(id =>
-      id && listaCortes.some(item => item.id === id) ? id : listaCortes[0]?.id || null
+    setEntregasSemEpisodio(semEpisodio);
+    const numeros = semanasDoEpisodio(listaCortes, listaEntregas);
+    setSemanaSelecionada(semana =>
+      semana && numeros.includes(semana) ? semana : numeros[0] || null
     );
   }
 
@@ -77,35 +96,41 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     setCarregando(true);
     setCortes([]);
     setEntregas([]);
-    setSelecionadoId(null);
+    setEntregasSemEpisodio([]);
+    setSemanaSelecionada(null);
+    setEntregaSelecionadaId(null);
     setMostrarNovo(false);
     setErro("");
     Promise.all([
       listarCortesEpisodio(projetoId, episodioId),
       listarEntregasParaCortes(projetoId, episodioId),
-    ]).then(([listaCortes, listaEntregas]) => {
+      listarEntregasSemEpisodio(projetoId),
+    ]).then(([listaCortes, listaEntregas, semEpisodio]) => {
       if (!ativo) return;
       setCortes(listaCortes);
       setEntregas(listaEntregas);
-      setSelecionadoId(listaCortes[0]?.id || null);
+      setEntregasSemEpisodio(semEpisodio);
+      setSemanaSelecionada(semanasDoEpisodio(listaCortes, listaEntregas)[0] || null);
     }).catch((e: any) => {
-      if (ativo) setErro(e?.message || "Não foi possível carregar as semanas. Verifique a migração.");
+      if (ativo) setErro(e?.message || "Não foi possível carregar as semanas deste episódio.");
     }).finally(() => { if (ativo) setCarregando(false); });
     return () => { ativo = false; };
   }, [projetoId, episodioId]);
 
-  const proximaSemana = Math.max(
-    0, ...cortes.map(c => c.semana), ...semanasLegadas.map(s => s.semana)
-  ) + 1;
-  const selecionado = cortes.find(c => c.id === selecionadoId) || null;
-  const entregasVinculadas = useMemo(
-    () => entregas.filter(e => selecionado && e.episodio_corte_id === selecionado.id),
-    [entregas, selecionado]
-  );
-  const pendentesLegadas = useMemo(
-    () => selecionado ? candidatasLegadasPorCorte(entregas, selecionado) : [],
-    [entregas, selecionado]
-  );
+  const semanas = useMemo(() => semanasDoEpisodio(cortes, entregas), [cortes, entregas]);
+  const semanaAtual = semanaSelecionada && semanas.includes(semanaSelecionada)
+    ? semanaSelecionada : semanas[0] || null;
+  const proximaSemana = Math.max(0, ...semanas) + 1;
+  const selecionado = cortes.find(c => c.semana === semanaAtual) || null;
+  const entregasDaSemana = useMemo(() => entregas.filter((e) => {
+    if (semanaAtual === null) return false;
+    if (e.episodio_corte_id != null) {
+      return cortes.some((c) => c.id === e.episodio_corte_id && c.semana === semanaAtual);
+    }
+    return deliveryWeekNumbers(e.semana).includes(semanaAtual);
+  }), [entregas, cortes, semanaAtual]);
+  const entregaEmFoco = entregasDaSemana.find(e => e.id === entregaSelecionadaId)
+    || entregasDaSemana[0] || null;
 
   async function criar(event: React.FormEvent) {
     event.preventDefault();
@@ -128,7 +153,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       setMostrarNovo(false);
       setNovo(inicial);
       await recarregar();
-      setSelecionadoId(criado.id);
+      setSemanaSelecionada(criado.semana);
       if (onSemanaCriada) {
         try { await onSemanaCriada(); }
         catch (erro: any) { setErro("Semana cadastrada, mas o Forms não foi atualizado: " + (erro?.message || "erro de integração")); }
@@ -181,6 +206,33 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     }
   }
 
+  async function associarAoEpisodio(entrega: EntregaCorte) {
+    if (!podeEditar || salvando) return;
+    if (!window.confirm(
+      "Associar a gravação de " + (entrega.personagem || entrega.dublador || "participante") +
+      " (" + (entrega.semana || "sem semana") + ") ao episódio selecionado? " +
+      "Isso NÃO apagará a avaliação e não irá alterar as respostas do Google Forms."
+    )) return;
+    setSalvando(true);
+    setErro("");
+    try {
+      await vincularEntregaAoEpisodio({ entregaId: entrega.id, projetoId, episodioId });
+      await registrarHistoricoEpisodio({
+        projetoId, episodioId, tipo: "entrega_legada_associada",
+        descricao: "Entrega histórica associada manualmente: " +
+          (entrega.personagem || entrega.dublador || "participante") + " — " +
+          (entrega.semana || "sem semana") + ".",
+        usuario: usuarioNome, dados: { entrega_id: entrega.id },
+      });
+      await recarregar();
+      if (onEntregaAvaliada) await onEntregaAvaliada();
+    } catch (e: any) {
+      setErro(e?.message || "Falha ao associar gravação ao episódio.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function avaliarEntrega(entrega: EntregaCorte, status: "aprovado" | "regravacao") {
     if (!podeEditar || salvando) return;
     const comentario = window.prompt(
@@ -204,9 +256,9 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
         episodioId,
         tipo: status === "aprovado" ? "entrega_aprovada" : "regravacao_solicitada",
         descricao: (status === "aprovado" ? "Entrega aprovada: " : "Regravação solicitada: ") +
-          (entrega.personagem || "Personagem") + " — " + cutLabel(selecionado?.semana || 1) + ".",
+          (entrega.personagem || "Personagem") + " — " + cutLabel(semanaAtual || 1) + ".",
         usuario: usuarioNome,
-        dados: { entrega_id: entrega.id, corte_id: selecionado?.id, comentario: comentario.trim() },
+        dados: { entrega_id: entrega.id, corte_id: selecionado?.id || null, comentario: comentario.trim() },
       });
       await recarregar();
       if (onEntregaAvaliada) await onEntregaAvaliada();
