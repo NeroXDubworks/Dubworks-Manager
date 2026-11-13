@@ -821,9 +821,24 @@ export function resumoEntregasEpisodio(
       .trim()
       .toLocaleLowerCase("pt-BR");
     const envios = porPersonagem.get(chave) || [];
-    const aprovado = envios.some((item) => item.status === "aprovado");
-    const regravacao = envios.some((item) => item.status === "regravacao");
-    const aguardando = envios.some((item) => item.status === "pendente");
+    // Várias submissões da mesma semana representam versões de uma entrega:
+    // considerar apenas a mais recente evita "pendente" e "aprovado" ao mesmo tempo.
+    const atuaisPorCorte = new Map<string, EntregaProducao>();
+    const ordenados = [...envios].sort((a: any, b: any) => {
+      const da = Date.parse(String(a.data_envio || a.criado_em || "")) || 0;
+      const db = Date.parse(String(b.data_envio || b.criado_em || "")) || 0;
+      return da - db || Number(a.id || 0) - Number(b.id || 0);
+    });
+    ordenados.forEach((envio: any) => {
+      const chaveCorte = envio.episodio_corte_id
+        ? "corte:" + envio.episodio_corte_id
+        : "semana:" + String(envio.semana || "").trim().toLocaleLowerCase("pt-BR");
+      atuaisPorCorte.set(chaveCorte, envio);
+    });
+    const atuais = [...atuaisPorCorte.values()];
+    const aprovado = atuais.length > 0 && atuais.every((envio) => envio.status === "aprovado");
+    const regravacao = atuais.some((envio) => envio.status === "regravacao");
+    const aguardando = atuais.some((envio) => envio.status === "pendente");
 
     return {
       ...item,
@@ -831,7 +846,9 @@ export function resumoEntregasEpisodio(
       aprovado,
       regravacao,
       aguardando,
-      pendente: !aprovado,
+      // Só cobrar quem ainda não enviou nada. Quem enviou e aguarda
+      // avaliação é responsabilidade da liderança, não do dublador.
+      pendente: envios.length === 0,
     };
   });
 
