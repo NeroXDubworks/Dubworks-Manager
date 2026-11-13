@@ -297,7 +297,6 @@ export default function DubworksManager() {
   const [membroSelecionadoId, setMembroSelecionadoId] = useState<number | null>(
     null
   );
-  const [registroSemanalTexto, setRegistroSemanalTexto] = useState("");
   const [episodioNotificadoId, setEpisodioNotificadoId] = useState<number | null>(null);
   const [abaProjeto, setAbaProjeto] = useState<
     | "informacoes"
@@ -448,22 +447,14 @@ export default function DubworksManager() {
   const [entregasProducao, setEntregasProducao] = useState<EntregaProducao[]>(
     []
   );
-  const [entregaVisualizadaId, setEntregaVisualizadaId] = useState<number | null>(null);
-  const [comentarioLiderPorEntrega, setComentarioLiderPorEntrega] = useState<Record<number, string>>({});
   const [sincronizandoEntregas, setSincronizandoEntregas] = useState(false);
   const [semanasProjeto, setSemanasProjeto] = useState<ProjetoSemana[]>([]);
   const [semanaFiltroProducao, setSemanaFiltroProducao] = useState(1);
   const [liberandoSemana, setLiberandoSemana] = useState(false);
-  const [enviandoLembretesWhatsapp, setEnviandoLembretesWhatsapp] =
-    useState(false);
   const [participantesSemanaProjeto, setParticipantesSemanaProjeto] = useState<
     ParticipanteSemanaProjeto[]
   >([]);
   const [carregandoParticipantesSemana, setCarregandoParticipantesSemana] =
-    useState(false);
-  const [mostrarAdicionarSemana, setMostrarAdicionarSemana] = useState(false);
-  const [criandoSemanaProjeto, setCriandoSemanaProjeto] = useState(false);
-  const [alterandoParticipanteSemana, setAlterandoParticipanteSemana] =
     useState(false);
   const [reabrindoPapelId, setReabrindoPapelId] = useState<string | null>(null);
 
@@ -1411,105 +1402,6 @@ export default function DubworksManager() {
     );
   }
 
-  async function adicionarParticipanteNaSemana(
-    projeto: Projeto,
-    item: ElencoItem
-  ) {
-    if (!item.id || !item.dublador?.trim()) {
-      alert("Defina um dublador antes de adicionar este personagem à semana.");
-      return;
-    }
-
-    try {
-      setAlterandoParticipanteSemana(true);
-      const ok = await adicionarElencoSemanaBanco(
-        projeto.ID,
-        semanaFiltroProducao,
-        item.id,
-        usuarioLogado?.nome || usuarioLogado?.login || "Sistema"
-      );
-
-      if (!ok) {
-        alert("Não consegui adicionar este dublador à semana.");
-        return;
-      }
-
-      await carregarParticipantesSemanaProjetoBancoLocal(
-        projeto,
-        semanaFiltroProducao
-      );
-    } finally {
-      setAlterandoParticipanteSemana(false);
-    }
-  }
-
-  async function removerParticipanteDaSemana(
-    projeto: Projeto,
-    participante: ParticipanteSemanaProjeto
-  ) {
-    const confirmar = window.confirm(
-      `Remover ${participante.personagem} — ${participante.dublador} somente da ${labelSemana(
-        semanaFiltroProducao
-      )}? O Banco do Projeto e as semanas anteriores não serão alterados.`
-    );
-
-    if (!confirmar) return;
-
-    try {
-      setAlterandoParticipanteSemana(true);
-      const ok = await removerElencoSemanaBanco(
-        projeto.ID,
-        semanaFiltroProducao,
-        participante.elenco_id
-      );
-
-      if (!ok) {
-        alert("Não consegui remover este participante da semana.");
-        return;
-      }
-
-      await carregarParticipantesSemanaProjetoBancoLocal(
-        projeto,
-        semanaFiltroProducao
-      );
-    } finally {
-      setAlterandoParticipanteSemana(false);
-    }
-  }
-
-  async function reabrirPapelProjeto(item: ElencoItem) {
-    if (!projetoPainel || !item.id || reabrindoPapelId) return;
-
-    const confirmar = window.confirm(
-      `Reabrir o papel de ${item.personagem}? ${item.dublador || "O dublador atual"} deixará de ser a escalação ativa, mas continuará registrado(a) nas semanas anteriores.`
-    );
-
-    if (!confirmar) return;
-
-    try {
-      setReabrindoPapelId(String(item.id));
-      const novoId = await reabrirPapelProjetoBanco(
-        projetoPainel.ID,
-        item.id,
-        `Papel reaberto por ${
-          usuarioLogado?.nome || usuarioLogado?.login || "Sistema"
-        }.`
-      );
-
-      if (!novoId) {
-        alert("Não consegui reabrir este papel.");
-        return;
-      }
-
-      await recarregarProjetos();
-      alert(
-        `${item.personagem} foi reaberto. As semanas anteriores continuam com ${item.dublador || "a escalação anterior"}.`
-      );
-    } finally {
-      setReabrindoPapelId(null);
-    }
-  }
-
   async function verificarLiberacaoAutomaticaSemana(
     projeto: Projeto,
     entregas: EntregaProducao[]
@@ -1558,36 +1450,6 @@ export default function DubworksManager() {
     } finally {
       setLiberandoSemana(false);
     }
-  }
-
-  async function alterarStatusEntrega(
-    entrega: EntregaProducao,
-    status: "pendente" | "aprovado" | "regravacao"
-  ) {
-    if (!entrega.id) {
-      alert("Entrega ainda não foi salva no Supabase.");
-      return;
-    }
-
-    const comentarioLider =
-      comentarioLiderPorEntrega[entrega.id] ?? entrega.comentario_lider ?? "";
-    const ok = await atualizarStatusEntregaBanco(
-      entrega.id,
-      status,
-      usuarioLogado?.nome || usuarioLogado?.login || "Sistema",
-      comentarioLider
-    );
-
-    if (!ok) {
-      alert("Não consegui atualizar o status da entrega.");
-      return;
-    }
-
-    setEntregasProducao((anteriores) =>
-      anteriores.map((item) =>
-        item.id === entrega.id ? { ...item, status, comentario_lider: comentarioLider } : item
-      )
-    );
   }
 
   function renderAbaSelecaoVisual(projeto: Projeto) {
@@ -6622,35 +6484,6 @@ export default function DubworksManager() {
         normalizar(u.nome) === normalizar(membro.nome)
     );
     return perfil ? cargoLabel(perfil.cargo) : "Membro";
-  }
-
-  async function salvarRegistroSemanalProjeto() {
-    if (!projetoPainel || !registroSemanalTexto.trim()) {
-      alert("Selecione um projeto e escreva o registro semanal.");
-      return;
-    }
-
-    const agora = new Date();
-    const carimbo = agora.toLocaleString("pt-BR");
-    const autor = usuarioLogado?.nome || "Usuário";
-    const novoRegistro = `[${carimbo}] ${autor}: ${registroSemanalTexto.trim()}`;
-    const registroAnterior = projetoPainel.Registro_Semanal || "";
-    const projetoAtualizado: Projeto = {
-      ...projetoPainel,
-      Registro_Semanal: [novoRegistro, registroAnterior]
-        .filter(Boolean)
-        .join("\n\n"),
-    };
-
-    const ok = await atualizarProjetoBanco(projetoAtualizado);
-    if (!ok) {
-      alert("Não consegui salvar o registro semanal.");
-      return;
-    }
-
-    setRegistroSemanalTexto("");
-    await recarregarProjetos();
-    alert("Registro semanal salvo com data e hora.");
   }
 
   const SidebarItem = ({
@@ -15736,145 +15569,6 @@ export default function DubworksManager() {
                 ? "Adicionando..."
                 : `Adicionar ${pessoasSelecionadasChat.length || ""} pessoa(s)`}
             </button>
-          </div>
-        </Modal>
-      )}
-
-      {mostrarAdicionarSemana && projetoPainel && (
-        <Modal
-          titulo={`Adicionar dublador à ${labelSemana(
-            semanaFiltroProducao
-          )}`}
-          onClose={() => setMostrarAdicionarSemana(false)}
-          largo
-        >
-          <div style={{ display: "grid", gap: 14 }}>
-            <p style={{ color: "#94a3b8", margin: 0 }}>
-              Selecione no Banco do Projeto quem participa desta semana. O
-              vínculo guarda uma fotografia da escalação atual, então trocas
-              futuras de dublador não alteram esta semana.
-            </p>
-
-            {((rascunho || projetoPainel)?.Elenco || []).length ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                {((rascunho || projetoPainel)?.Elenco || []).map(
-                  (item, index) => {
-                    const idBancoValido = Number.isFinite(Number(item.id));
-                    const jaAdicionado =
-                      idBancoValido &&
-                      participantesSemanaProjeto.some(
-                        (participante) =>
-                          participante.elenco_id === Number(item.id)
-                      );
-                    const semDublador = !item.dublador?.trim();
-
-                    return (
-                      <div
-                        key={item.id || index}
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: isMobile
-                            ? "1fr"
-                            : "1.2fr 1.2fr 1fr auto",
-                          gap: 12,
-                          alignItems: "center",
-                          background: "rgba(2,6,23,0.54)",
-                          border:
-                            "1px solid rgba(148,163,184,0.14)",
-                          borderRadius: 14,
-                          padding: 14,
-                        }}
-                      >
-                        <div>
-                          <div
-                            style={{ color: "#94a3b8", fontSize: 11 }}
-                          >
-                            Personagem
-                          </div>
-                          <strong style={{ color: "#f8fafc" }}>
-                            {item.personagem || "-"}
-                          </strong>
-                        </div>
-
-                        <div>
-                          <div
-                            style={{ color: "#94a3b8", fontSize: 11 }}
-                          >
-                            Dublador
-                          </div>
-                          <strong
-                            style={{
-                              color: semDublador ? "#fde68a" : "#f8fafc",
-                            }}
-                          >
-                            {item.dublador || "Papel aberto"}
-                          </strong>
-                        </div>
-
-                        <div style={{ color: "#cbd5e1", fontSize: 13 }}>
-                          {item.telefone_dublador || "Sem número"}
-                        </div>
-
-                        <button
-                          type="button"
-                          disabled={
-                            jaAdicionado ||
-                            semDublador ||
-                            !idBancoValido ||
-                            alterandoParticipanteSemana
-                          }
-                          onClick={async () => {
-                            await adicionarParticipanteNaSemana(
-                              projetoPainel,
-                              item
-                            );
-                          }}
-                          style={{
-                            ...botaoPrimarioStyle,
-                            opacity:
-                              jaAdicionado || semDublador || !idBancoValido
-                                ? 0.55
-                                : 1,
-                            cursor:
-                              jaAdicionado || semDublador || !idBancoValido
-                                ? "not-allowed"
-                                : "pointer",
-                          }}
-                        >
-                          {jaAdicionado
-                            ? "✓ Na semana"
-                            : semDublador
-                            ? "Sem dublador"
-                            : !idBancoValido
-                            ? "Salve o banco"
-                            : "+ Adicionar"}
-                        </button>
-                      </div>
-                    );
-                  }
-                )}
-              </div>
-            ) : (
-              <div style={{ color: "#94a3b8" }}>
-                O Banco do Projeto ainda está vazio.
-              </div>
-            )}
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                marginTop: 6,
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setMostrarAdicionarSemana(false)}
-                style={botaoSecundarioStyle}
-              >
-                Fechar
-              </button>
-            </div>
           </div>
         </Modal>
       )}
