@@ -59,7 +59,8 @@ export default function ProjectActivityPanel({
         episodioId: n.episodio_id,
         notificacao: n as NotificacaoChat | null,
       }));
-    const alteracoes = historico.map((h) => ({
+    const notificacoesDeHistorico = new Set(avisos.map((n) => n.notificacao?.historico_id).filter(Boolean));
+    const alteracoes = historico.filter((h) => !notificacoesDeHistorico.has(h.id)).map((h) => ({
       chave: "h-" + h.id,
       data: h.criado_em,
       titulo: "Histórico do episódio",
