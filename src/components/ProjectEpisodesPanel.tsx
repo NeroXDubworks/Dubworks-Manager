@@ -44,6 +44,7 @@ type Props = {
   projeto: Projeto;
   usuarioNome?: string;
   podeEditar?: boolean;
+  podeCobrar?: boolean;
   episodioInicialId?: number | null;
 };
 
@@ -131,6 +132,7 @@ export default function ProjectEpisodesPanel({
   projeto,
   usuarioNome = "Sistema",
   podeEditar = false,
+  podeCobrar = false,
   episodioInicialId,
 }: Props) {
   const [episodios, setEpisodios] = useState<ProjetoEpisodio[]>([]);
@@ -1123,6 +1125,10 @@ export default function ProjectEpisodesPanel({
                 usuarioNome={usuarioNome}
                 subdivisoesExistentes={episodios.filter(item => item.parent_id === episodio.id)}
                 atualizarChave={versaoEntregas}
+                podeCobrar={podeCobrar}
+                nomeProjeto={projeto.Projeto}
+                numeroEpisodio={episodio.numero}
+                elencoEpisodio={elenco}
                 onEntregaAvaliada={async () => { await recarregarDetalhes(episodio.id); }}
                 onSemanaCriada={async () => {
                   if (!episodio.form_entregas_id) return;
@@ -1461,12 +1467,7 @@ export default function ProjectEpisodesPanel({
                       )}
                     </div>
 
-                    <button
-                      style={{ ...primary, width: "100%", marginTop: 12 }}
-                      onClick={cobrarPendentes}
-                    >
-                      💬 Cobrar pendentes pelo bot
-                    </button>
+              
                   </div>
 
                   <div style={card}>
