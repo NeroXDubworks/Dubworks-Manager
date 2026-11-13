@@ -936,7 +936,7 @@ function lerRespostas_(payload, tipo) {
   if (tipo === 'entregas' && payload.formId) {
     try {
       respostasNativas = FormApp.openById(extrairId_(payload.formId))
-        .getResponses().map(function (r) { return r.getId(); });
+        .getResponses().map(function (r) { return typeof r.getId === 'function' ? r.getId() : '';  });
     } catch (_) {}
   }
 
@@ -1143,7 +1143,7 @@ function lerRespostasDiretoDoFormulario_(payload) {
     return {
       // Preserva compatibilidade com as linhas quando a planilha for ligada
       // e as respostas forem exportadas em ordem cronológica.
-      id: String(response.getId() || index + 2),
+      id: String((typeof response.getId === 'function' ? response.getId() : index + 2)),
       linha: index + 2,
       timestamp: timestamp && timestamp.toISOString
         ? timestamp.toISOString()
