@@ -1437,8 +1437,9 @@ export default function ProjectEpisodesPanel({
                 <div style={{ display: "grid", gap: 14, alignSelf: "start" }}>
                   <div style={card}>
                     <strong style={{ color: "#f8fafc" }}>
-                      Quem está pendente
+                      Sem gravação registrada no EP
                     </strong>
+                    <p style={{ color: "#94a3b8", fontSize: 12, margin: "7px 0 0" }}>Para conferir e cobrar por semana, use o painel de gravações acima.</p>
                     <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                       {resumo.situacoes
                         .filter((item) => item.pendente)
