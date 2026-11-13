@@ -390,7 +390,7 @@ export interface ChatPreferencia {
   updated_at: string;
 }
 
-export type TipoNotificacaoChat = "mensagem" | "mencao" | "resposta";
+export type TipoNotificacaoChat = "mensagem" | "mencao" | "resposta" | "entrega_semana";
 
 export interface ChatMencao {
   id?: number;
@@ -405,6 +405,9 @@ export interface NotificacaoChat {
   tipo: TipoNotificacaoChat;
   canal_id: string | null;
   mensagem_id: number | null;
+  projeto_id?: number | null;
+  episodio_id?: number | null;
+  entrega_id?: number | null;
   autor_login: string;
   autor_nome: string;
   titulo: string;
@@ -1702,6 +1705,9 @@ function mapNotificacaoChatDb(item: any): NotificacaoChat {
       item.mensagem_id === null || item.mensagem_id === undefined
         ? null
         : Number(item.mensagem_id),
+    projeto_id: item.projeto_id == null ? null : Number(item.projeto_id),
+    episodio_id: item.episodio_id == null ? null : Number(item.episodio_id),
+    entrega_id: item.entrega_id == null ? null : Number(item.entrega_id),
     autor_login: item.autor_login || "",
     autor_nome: item.autor_nome || "",
     titulo: item.titulo || "",
