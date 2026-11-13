@@ -63,10 +63,29 @@ export default async function handler(req, res) {
       return responder(res, 403, { ok: false, error: "Este formulário não está vinculado ao episódio." });
     }
 
+    const matchSemana = String(body.semana || "").match(/semana\\s*0*(\\d+)/i);
+    let corteId = null;
+    if (matchSemana) {
+      const corteQuery = new URLSearchParams({
+        select: "id",
+        projeto_id: "eq." + projetoId,
+        episodio_id: "eq." + episodioId,
+        semana: "eq." + Number(matchSemana[1]),
+        limit: "1",
+      });
+      const cortesResp = await fetch(
+        SUPABASE_URL + "/rest/v1/episodio_cortes?" + corteQuery.toString(),
+        { headers }
+      );
+      const cortes = await cortesResp.json().catch(() => []);
+      if (cortesResp.ok && Array.isArray(cortes) && cortes[0]) corteId = Number(cortes[0].id);
+    }
+
     const campo = (valor, limite = 500) => String(valor || "").trim().slice(0, limite);
     const entrega = {
       projeto_id: projetoId,
       episodio_id: episodioId,
+      episodio_corte_id: corteId,
       resposta_id: formId + ":" + respostaId,
       personagem: campo(body.personagem),
       dublador: campo(body.dublador),
