@@ -1126,6 +1126,7 @@ export default function ProjectEpisodesPanel({
                 subdivisoesExistentes={episodios.filter(item => item.parent_id === episodio.id)}
                 semanasLegadas={episodiosPrincipais.length === 1 ? semanasLegadas : []}
                 onAbrirAcervo={onAbrirAcervo}
+                onEntregaAvaliada={async () => { await recarregarDetalhes(episodio.id); }}
                 onSemanaCriada={async () => {
                   if (!episodio.form_entregas_id) return;
                   await prepararFormEpisodio({
