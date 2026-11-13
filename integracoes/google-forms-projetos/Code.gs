@@ -46,6 +46,9 @@ function doPost(e) {
       case 'preparar_formularios_projeto':
         return json_(prepararFormulariosProjeto_(payload));
 
+      case 'preparar_formulario_episodio':
+        return json_(prepararFormularioEpisodio_(payload));
+
       case 'sincronizar_form_selecao':
         return json_(sincronizarFormulario_(payload, 'selecao'));
 
@@ -243,6 +246,101 @@ function prepararFormulariosProjeto_(payload) {
       entregas: entregas.reused,
     },
   };
+}
+
+
+/**
+ * Um Form de Entregas por episódio, sem renomear ou sobrescrever os antigos.
+ * Reexecutar a ação atualiza o mesmo ID, preservando respostas e planilhas.
+ */
+function prepararFormularioEpisodio_(payload) {
+  const projectName = limparNomeProjeto_(payload.projectName || payload.projetoNome);
+  const numero = Number(payload.episodioNumero);
+  const episodioId = Number(payload.episodioId);
+  const projectId = String(payload.projectId || '').trim();
+  const pastaId = extrairId_(payload.entregasFolderId);
+  const personagens = normalizarLista_(payload.personagensEntregas || []);
+  const semanas = normalizarLista_(payload.semanas || ['Semana 01']);
+  if (!projectName || !projectId || !Number.isInteger(numero) || numero < 1 ||
+      !Number.isInteger(episodioId) || episodioId < 1 || !pastaId || !personagens.length) {
+    throw new Error('Dados insuficientes para gerar o Forms deste episódio.');
+  }
+  const props = PropertiesService.getScriptProperties();
+  const templateId = extrairId_(
+    props.getProperty(DW_CFG.TEMPLATE_DELIVERIES_PROP) || DW_CFG.DEFAULT_TEMPLATE_DELIVERIES_ID
+  );
+  const pasta = DriveApp.getFolderById(pastaId);
+  const chave = 'DUBWORKS_EP_FORM_' + projectId + '_' + episodioId;
+  const salvo = props.getProperty(chave);
+  const idExistente = extrairId_(payload.existingDeliveriesFormId || salvo || '');
+  const epRotulo = 'EP ' + String(numero).padStart(2, '0');
+  const tituloEpisodio = String(payload.episodioTitulo || '').trim();
+  const rotulo = epRotulo + (tituloEpisodio ? ' - ' + tituloEpisodio : '');
+  const titulo = '[Entregas] - ' + projectName + ' - ' + rotulo;
+
+  let form;
+  let reutilizado = false;
+  if (idExistente) {
+    try {
+      form = FormApp.openById(idExistente);
+      reutilizado = true;
+    } catch (err) {
+      console.warn('Form registrado não pôde ser aberto: ' + err);
+    }
+  }
+  if (!form) {
+    const arquivo = DriveApp.getFileById(templateId).makeCopy(titulo, pasta);
+    form = FormApp.openById(arquivo.getId());
+    try { form.removeDestination(); } catch (_) {}
+  }
+
+  prepararFormulario_(form, {
+    tipo: 'entregas', projectName: projectName,
+    personagens: personagens,
+    capaUrl: String(payload.capaUrl || '').trim(),
+  });
+  form.setTitle(titulo);
+  DriveApp.getFileById(form.getId()).setName(titulo);
+  atualizarEpisodiosEntregas_(form, [rotulo]);
+  atualizarSemanasEntregas_(form, semanas.length ? semanas : ['Semana 01']);
+  form.setAcceptingResponses(true);
+
+  const planilha = garantirPlanilhaRespostas_(
+    form, titulo + ' - Respostas', pasta
+  );
+  garantirLocalizacaoFormulario_(form, pasta, planilha);
+  registrarDestinoUpload_(form, pasta, 'entregas', projectName, {
+    projectId: Number(projectId), episodioId: episodioId,
+  });
+  props.setProperty(chave, form.getId());
+  return {
+    ok: true,
+    episodioId: episodioId,
+    episodioNumero: numero,
+    formEntregas: infoFormulario_(form),
+    planilhaEntregas: infoPlanilha_(planilha),
+    reused: reutilizado,
+  };
+}
+
+function atualizarSemanasEntregas_(form, semanas) {
+  const valores = normalizarLista_(semanas);
+  if (!valores.length) return;
+  const aliases = ['semana/corte', 'semana / corte', 'semana'];
+  const items = form.getItems();
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (aliases.indexOf(normalizarTexto_(item.getTitle())) < 0) continue;
+    if (item.getType() === FormApp.ItemType.LIST) {
+      item.asListItem().setChoiceValues(valores).setRequired(true);
+      return;
+    }
+    if (item.getType() === FormApp.ItemType.MULTIPLE_CHOICE) {
+      item.asMultipleChoiceItem().setChoiceValues(valores).setRequired(true);
+      return;
+    }
+  }
+  form.addListItem().setTitle('Semana/Corte').setChoiceValues(valores).setRequired(true);
 }
 
 function obterOuCriarFormulario_(opts) {
@@ -502,7 +600,7 @@ function garantirPlanilhaRespostas_(form, titulo, pasta) {
   return ss;
 }
 
-function registrarDestinoUpload_(form, pasta, tipo, projectName) {
+function registrarDestinoUpload_(form, pasta, tipo, projectName, meta) {
   const props = PropertiesService.getScriptProperties();
   props.setProperty(
     DW_CFG.FORM_UPLOAD_TARGET_PREFIX + form.getId(),
@@ -510,6 +608,8 @@ function registrarDestinoUpload_(form, pasta, tipo, projectName) {
       folderId: pasta.getId(),
       tipo: tipo,
       projectName: projectName,
+      projectId: meta && meta.projectId ? meta.projectId : null,
+      episodioId: meta && meta.episodioId ? meta.episodioId : null,
     })
   );
 
