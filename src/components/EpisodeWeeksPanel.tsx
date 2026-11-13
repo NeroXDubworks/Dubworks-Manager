@@ -273,14 +273,14 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     <section style={{ ...painel, display: "grid", gap: 14 }} aria-label="Semanas e cortes do episódio">
       <div style={{ display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
         <div>
-          <h3 style={{ color: "#f8fafc", margin: 0 }}>📅 Banco e Semanas · Episódio</h3>
+          <h3 style={{ color: "#f8fafc", margin: 0 }}>📅 Semanas, gravações e avaliações deste episódio</h3>
           <p style={{ ...texto, margin: "6px 0 0" }}>
-            Cada semana é um único corte de duração real. Não altera semanas antigas do projeto.
+            Escolha uma semana para ver as falas, assistir às gravações e avaliar no mesmo lugar. Registros antigos já vinculados a este episódio são exibidos automaticamente.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#c4b5fd", fontWeight: 800 }}>
-            {cortes.length} semana(s) · {formatCutDuration(sumCutDurations(cortes))}
+            {semanas.length} semana(s) · {cortes.length ? formatCutDuration(sumCutDurations(cortes)) : "Duração histórica não cadastrada"}
           </span>
           <button type="button" style={botao} disabled={carregando || salvando} onClick={() => {
             setCarregando(true); setErro("");
@@ -298,113 +298,177 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
           {subdivisoesExistentes.map(item => <div key={item.id} style={{ color: "#cbd5e1", fontSize: 13 }}>{item.titulo || `Item ${item.numero}`} · {item.status}</div>)}
         </div>
       )}
+
       {carregando && <p style={texto}>Carregando semanas e entregas...</p>}
-      {semanasLegadas.length > 0 && (
-        <div style={{ padding: 12, borderRadius: 10, background: "rgba(14,165,233,.08)",
-          border: "1px solid rgba(56,189,248,.25)" }}>
-          <strong style={{ color: "#bae6fd" }}>Semanas anteriores deste projeto</strong>
-          <p style={{ ...texto, margin: "6px 0" }}>
-            As gravações, avaliações e participantes continuam preservados. Como não tinham vínculo direto
-            com episódio, não serão migrados automaticamente nem recadastrados.
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            {semanasLegadas.map(s => (
-              <span key={s.semana} style={{ color: "#e2e8f0", fontSize: 13,
-                padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(148,163,184,.2)" }}>
-                {cutLabel(s.semana)} · {s.status === "concluida" ? "Concluída (anterior)" : "Aberta (anterior)"}
-              </span>
-            ))}
-            {onAbrirAcervo && <button type="button" style={botao} onClick={onAbrirAcervo}>
-              Ver gravações e participantes anteriores
-            </button>}
-          </div>
+      {!carregando && semanas.length === 0 && (
+        <p style={texto}>Nenhuma semana vinculada a este episódio. Cadastre uma semana para iniciar a produção.</p>
+      )}
+      {semanas.length > 0 && (
+        <div role="tablist" aria-label="Semanas deste episódio"
+          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 9 }}>
+          {semanas.map((n) => {
+            const corte = cortes.find((c) => c.semana === n);
+            const quantidade = entregas.filter(e => e.episodio_corte_id != null
+              ? corte?.id === e.episodio_corte_id
+              : deliveryWeekNumbers(e.semana).includes(n)).length;
+            return (
+              <button key={n} type="button" role="tab" aria-selected={semanaAtual === n}
+                onClick={() => { setSemanaSelecionada(n); setEntregaSelecionadaId(null); }}
+                style={{ ...botao, textAlign: "left",
+                  borderColor: semanaAtual === n ? "#a78bfa" : "rgba(139,92,246,.24)",
+                  background: semanaAtual === n ? "rgba(124,58,237,.32)" : "rgba(2,6,23,.4)" }}>
+                <strong style={{ display: "block", fontSize: 15 }}>{cutLabel(n)}</strong>
+                <span style={{ ...texto, color: "#c4b5fd", display: "block", marginTop: 5 }}>
+                  {corte ? formatCutDuration(corte.duracao_segundos) : "Histórico do episódio"}
+                </span>
+                <span style={{ ...texto, display: "block" }}>
+                  {corte ? estados[corte.status] : "Sem corte novo"} · {quantidade} envio(s)
+                </span>
+              </button>
+            );
+          })}
         </div>
       )}
-      {!carregando && cortes.length === 0 && semanasLegadas.length === 0 && (
-        <p style={texto}>Nenhuma semana/corte cadastrada neste episódio.</p>
-      )}
-
-      {cortes.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 9 }}>
-          {cortes.map(corte => (
-            <button key={corte.id} type="button" onClick={() => setSelecionadoId(corte.id)}
-              style={{ ...botao, textAlign: "left", borderColor: selecionado?.id === corte.id ? "#a78bfa" : "rgba(139,92,246,.24)", background: selecionado?.id === corte.id ? "rgba(124,58,237,.27)" : "rgba(2,6,23,.4)" }}>
-              <strong style={{ display: "block" }}>{cutLabel(corte.semana)}</strong>
-              <span style={{ ...texto, color: "#c4b5fd" }}>{formatCutDuration(corte.duracao_segundos)}</span>
-              <span style={{ ...texto, display: "block" }}>{estados[corte.status]}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {selecionado && (
-        <div style={{ background: "rgba(2,6,23,.42)", borderRadius: 12, padding: 14, display: "grid", gap: 12 }}>
+      {semanaAtual !== null && (
+        <div style={{ background: "rgba(2,6,23,.42)", borderRadius: 12, padding: 14, display: "grid", gap: 14 }}>
           <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <strong style={{ color: "#f8fafc" }}>{cutLabel(selecionado.semana)} — {formatCutDuration(selecionado.duracao_segundos)}</strong>
-              {selecionado.motivo_pausa && <p style={{ ...texto, margin: "4px 0" }}>Pausa: {selecionado.motivo_pausa}</p>}
-              {selecionado.observacao && <p style={{ ...texto, margin: "4px 0" }}>{selecionado.observacao}</p>}
-              {selecionado.prazo_em && <p style={{ ...texto, margin: "4px 0" }}>Prazo: {new Date(selecionado.prazo_em).toLocaleDateString("pt-BR")}</p>}
+              <strong style={{ color: "#f8fafc", fontSize: 17 }}>{cutLabel(semanaAtual)}</strong>
+              <div style={texto}>
+                {selecionado
+                  ? "Corte cadastrado · " + formatCutDuration(selecionado.duracao_segundos)
+                  : "Semana histórica do episódio · gravações e avaliações preservadas"}
+              </div>
+              {selecionado?.motivo_pausa && <p style={texto}>Pausa: {selecionado.motivo_pausa}</p>}
+              {selecionado?.observacao && <p style={texto}>{selecionado.observacao}</p>}
+              {selecionado?.prazo_em && <p style={texto}>Prazo: {new Date(selecionado.prazo_em).toLocaleDateString("pt-BR")}</p>}
             </div>
-            {podeEditar && (
+            {podeEditar && selecionado && (
               <label style={{ ...texto, display: "grid", gap: 4 }}>
-                Situação
-                <select style={{ ...campo, minWidth: 160 }} disabled={salvando} value={selecionado.status}
+                Status do corte
+                <select style={{ ...campo, minWidth: 165 }} disabled={salvando}
+                  value={selecionado.status}
                   onChange={e => void mudarStatus(selecionado, e.target.value as CorteStatus)}>
-                  {statusOpcoes.map(s => <option key={s} value={s}>{estados[s]}</option>)}
+                  {statusOpcoes.map(status => <option key={status} value={status}>{estados[status]}</option>)}
                 </select>
               </label>
             )}
           </div>
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
-            {selecionado.video_base_url && <a style={{ color: "#c4b5fd" }} href={selecionado.video_base_url} target="_blank" rel="noopener noreferrer">Vídeo-base ↗</a>}
-            {selecionado.trilha_url && <a style={{ color: "#c4b5fd" }} href={selecionado.trilha_url} target="_blank" rel="noopener noreferrer">Trilha/efeitos ↗</a>}
-          </div>
-
-          <strong style={{ color: "#f8fafc" }}>Entregas vinculadas ({entregasVinculadas.length})</strong>
-          {entregasVinculadas.map(entrega => (
-            <div key={entrega.id} style={{ borderTop: "1px solid rgba(148,163,184,.15)", paddingTop: 10 }}>
-              <strong style={{ color: "#e2e8f0" }}>{entrega.personagem || "Personagem"} — {entrega.dublador || "Sem nome"}</strong>
-              <span style={{ ...texto, marginLeft: 9 }}>{entrega.status || "pendente"}</span>
-              {entrega.telefone && <div style={texto}>Contato: {entrega.telefone}</div>}
-              {entrega.comentario && <div style={texto}>Comentário: {entrega.comentario}</div>}
-              {entrega.comentario_lider && <div style={texto}>Avaliação da liderança: {entrega.comentario_lider}</div>}
-              {entrega.data_envio && <div style={texto}>Enviado em: {entrega.data_envio}</div>}
-              {podeEditar && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                  <button type="button" style={{ ...botao, background: entrega.status === "aprovado" ? "rgba(22,163,74,.2)" : "rgba(30,83,60,.65)" }}
-                    disabled={salvando} onClick={() => void avaliarEntrega(entrega, "aprovado")}>
-                    ✓ Aprovar entrega
-                  </button>
-                  <button type="button" style={{ ...botao, background: "rgba(190,24,93,.18)", borderColor: "rgba(251,113,133,.4)" }}
-                    disabled={salvando} onClick={() => void avaliarEntrega(entrega, "regravacao")}>
-                    ↻ Solicitar regravação
-                  </button>
-                </div>
+          {selecionado && (selecionado.video_base_url || selecionado.trilha_url) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {selecionado.video_base_url && (
+                <a style={{ color: "#c4b5fd" }} href={selecionado.video_base_url}
+                  target="_blank" rel="noopener noreferrer">Vídeo-base ↗</a>
               )}
-              {entrega.video_url ? (
-                <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                  <iframe src={converterDriveParaPreview(entrega.video_url)} title={`Entrega de ${entrega.personagem || entrega.dublador}`} style={{ border: 0, width: "100%", maxWidth: 550, height: 240, borderRadius: 10 }} allow="fullscreen" />
-                  <a href={entrega.video_url} style={{ color: "#c4b5fd" }} target="_blank" rel="noopener noreferrer">Abrir vídeo original ↗</a>
-                </div>
-              ) : <p style={texto}>Vídeo não localizado no formulário.</p>}
-            </div>
-          ))}
-          {!entregasVinculadas.length && <p style={texto}>Nenhuma entrega vinculada a este corte ainda.</p>}
-
-          {pendentesLegadas.length > 0 && (
-            <div style={{ borderTop: "1px solid rgba(148,163,184,.15)", paddingTop: 10, display: "grid", gap: 8 }}>
-              <strong style={{ color: "#fde68a" }}>Entregas antigas a conferir ({pendentesLegadas.length})</strong>
-              <p style={{ ...texto, margin: 0 }}>Estas respostas já possuem episódio identificado e citam esta semana. Confirme individualmente antes de vinculá-las.</p>
-              {pendentesLegadas.map(entrega => (
-                <div key={entrega.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ color: "#cbd5e1" }}>{entrega.personagem || "Personagem"} — {entrega.dublador || "Sem nome"}</span>
-                  {podeEditar && <button type="button" disabled={salvando} style={botao} onClick={() => void vincular(entrega)}>Vincular a {cutLabel(selecionado.semana)}</button>}
-                </div>
-              ))}
+              {selecionado.trilha_url && (
+                <a style={{ color: "#c4b5fd" }} href={selecionado.trilha_url}
+                  target="_blank" rel="noopener noreferrer">Trilha/efeitos ↗</a>
+              )}
             </div>
           )}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", color: "#cbd5e1", fontSize: 13 }}>
+            <span>Recebidas: <strong>{entregasDaSemana.length}</strong></span>
+            <span style={{ color: "#86efac" }}>Aprovadas: <strong>{entregasDaSemana.filter(e => e.status === "aprovado").length}</strong></span>
+            <span style={{ color: "#fde68a" }}>Aguardando análise: <strong>{entregasDaSemana.filter(e => e.status === "pendente").length}</strong></span>
+            <span style={{ color: "#fda4af" }}>Regravações: <strong>{entregasDaSemana.filter(e => e.status === "regravacao").length}</strong></span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: 14 }}>
+            <div style={{ display: "grid", gap: 7, alignContent: "start" }}>
+              <strong style={{ color: "#f8fafc" }}>Gravações desta semana</strong>
+              {entregasDaSemana.map(entrega => (
+                <button key={entrega.id} type="button" onClick={() => setEntregaSelecionadaId(entrega.id)}
+                  style={{ ...botao, width: "100%", textAlign: "left",
+                    background: entregaEmFoco?.id === entrega.id ? "rgba(37,99,235,.22)" : "rgba(2,6,23,.4)",
+                    borderColor: entregaEmFoco?.id === entrega.id ? "#38bdf8" : "rgba(148,163,184,.16)" }}>
+                  <span style={{ display: "block", fontWeight: 700 }}>
+                    {entrega.personagem || "Personagem"} — {entrega.dublador || "Dublador"}
+                  </span>
+                  <span style={{ ...texto, color: entrega.status === "aprovado" ? "#86efac" : entrega.status === "regravacao" ? "#fda4af" : "#fde68a" }}>
+                    {entrega.status === "aprovado" ? "Aprovado" : entrega.status === "regravacao" ? "Regravação" : "Aguardando análise"}
+                  </span>
+                </button>
+              ))}
+              {!entregasDaSemana.length && <p style={texto}>Nenhuma gravação recebida nesta semana.</p>}
+            </div>
+            <div style={{ background: "rgba(15,23,42,.7)", borderRadius: 12, padding: 13, display: "grid", gap: 9, alignContent: "start" }}>
+              <strong style={{ color: "#f8fafc" }}>Prévia e avaliação</strong>
+              {entregaEmFoco ? (
+                <>
+                  <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
+                    {entregaEmFoco.personagem || "Personagem"} — {entregaEmFoco.dublador || "Dublador"}
+                  </div>
+                  {entregaEmFoco.data_envio && <span style={texto}>Enviado em: {entregaEmFoco.data_envio}</span>}
+                  {entregaEmFoco.telefone && <span style={texto}>Contato: {entregaEmFoco.telefone}</span>}
+                  {entregaEmFoco.comentario && <span style={texto}>Comentário: {entregaEmFoco.comentario}</span>}
+                  {entregaEmFoco.comentario_lider && <span style={texto}>Avaliação: {entregaEmFoco.comentario_lider}</span>}
+                  {entregaEmFoco.video_url ? (
+                    <>
+                      <iframe src={converterDriveParaPreview(entregaEmFoco.video_url)}
+                        title={"Gravação de " + (entregaEmFoco.personagem || entregaEmFoco.dublador || "participante")}
+                        style={{ border: 0, width: "100%", minHeight: 225, borderRadius: 10 }}
+                        allow="fullscreen" />
+                      <a style={{ color: "#c4b5fd" }} href={entregaEmFoco.video_url}
+                        target="_blank" rel="noopener noreferrer">Abrir arquivo original ↗</a>
+                    </>
+                  ) : <span style={texto}>Arquivo não localizado na resposta.</span>}
+                  {podeEditar && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button type="button" style={{ ...botao, background: "rgba(22,163,74,.2)" }}
+                        disabled={salvando} onClick={() => void avaliarEntrega(entregaEmFoco, "aprovado")}>
+                        ✓ Aprovar
+                      </button>
+                      <button type="button" style={{ ...botao, background: "rgba(190,24,93,.2)" }}
+                        disabled={salvando} onClick={() => void avaliarEntrega(entregaEmFoco, "regravacao")}>
+                        ↻ Solicitar regravação
+                      </button>
+                      {selecionado && !entregaEmFoco.episodio_corte_id &&
+                        deliveryWeekNumbers(entregaEmFoco.semana).length === 1 && (
+                          <button type="button" style={botao} disabled={salvando}
+                            onClick={() => void vincular(entregaEmFoco)}>
+                            Vincular ao corte
+                          </button>
+                        )}
+                    </div>
+                  )}
+                </>
+              ) : <span style={texto}>Selecione uma gravação para conferir.</span>}
+            </div>
+          </div>
+        </div>
+      )}
+      {entregasSemEpisodio.length > 0 && (
+        <div style={{ borderRadius: 12, padding: 14, border: "1px solid rgba(245,158,11,.3)", background: "rgba(245,158,11,.06)" }}>
+          <strong style={{ color: "#fde68a" }}>
+            Entregas sem episódio definido ({entregasSemEpisodio.length})
+          </strong>
+          <p style={{ ...texto, margin: "7px 0" }}>
+            Estes registros pertencem ao projeto, mas ainda não indicam um EP.
+            Verifique a gravação antes de associar; nenhuma associação é automática.
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {entregasSemEpisodio.map(entrega => (
+              <div key={entrega.id}
+                style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap",
+                  borderRadius: 9, padding: 9, background: "rgba(2,6,23,.45)" }}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong style={{ color: "#e2e8f0", fontSize: 13 }}>
+                    {entrega.personagem || "Personagem"} — {entrega.dublador || "Participante"}
+                  </strong>
+                  <span style={texto}>
+                    {entrega.semana || "Semana não informada"} · {entrega.status === "aprovado" ? "Aprovada" : "Aguardando conferência"}
+                  </span>
+                  {entrega.video_url && <a style={{ color: "#c4b5fd", fontSize: 12 }}
+                    href={entrega.video_url} target="_blank" rel="noopener noreferrer">Conferir gravação ↗</a>}
+                </div>
+                {podeEditar && (
+                  <button type="button" style={botao} disabled={salvando}
+                    onClick={() => void associarAoEpisodio(entrega)}>
+                    Associar ao EP selecionado
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
