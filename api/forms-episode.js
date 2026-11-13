@@ -65,6 +65,20 @@ export default async function handler(req, res) {
       return responder(res, 400, { ok: false, error: "Adicione personagens ao banco/elenco antes de preparar o Forms." });
     }
 
+    const cortesParams = new URLSearchParams({
+      select: "semana",
+      episodio_id: "eq." + episodeId,
+      order: "semana.asc",
+    });
+    const cortesResponse = await fetch(
+      SUPABASE_URL + "/rest/v1/episodio_cortes?" + cortesParams.toString(),
+      { headers: { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: "Bearer " + auth.token } }
+    );
+    const cortes = await cortesResponse.json().catch(() => []);
+    const semanas = cortesResponse.ok && Array.isArray(cortes) && cortes.length
+      ? cortes.map((c) => "Semana " + String(c.semana).padStart(2, "0"))
+      : ["Semana 01"];
+
     const scriptResponse = await fetch(PROJECT_FORMS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -79,6 +93,7 @@ export default async function handler(req, res) {
         entregasFolderId: episode.pasta_entregas_id,
         existingDeliveriesFormId: episode.form_entregas_id || "",
         personagensEntregas: personagens,
+        semanas,
         capaUrl: String(body?.capaUrl || "").trim(),
       }),
       redirect: "follow",
