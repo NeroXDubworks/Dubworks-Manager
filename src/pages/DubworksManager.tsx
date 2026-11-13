@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import "../mobile-first.css";
 import CortesPage from "./CortesPage";
 import ProjectEpisodesPanel from "../components/ProjectEpisodesPanel";
+import ProjectActivityPanel from "../components/ProjectActivityPanel";
 import CommercialCrmPanel from "../components/CommercialCrmPanel";
 
 import type {
@@ -297,12 +298,12 @@ export default function DubworksManager() {
     null
   );
   const [registroSemanalTexto, setRegistroSemanalTexto] = useState("");
+  const [mostrarAcervoAnterior, setMostrarAcervoAnterior] = useState(false);
+  const [episodioNotificadoId, setEpisodioNotificadoId] = useState<number | null>(null);
   const [abaProjeto, setAbaProjeto] = useState<
     | "informacoes"
     | "producao"
-    | "legado"
     | "selecao"
-    | "registros"
     | "drive"
     | "atividades"
     | "historico"
@@ -3327,6 +3328,15 @@ export default function DubworksManager() {
           lida_em: new Date().toISOString(),
         });
       }
+    }
+
+    if (notificacao.projeto_id) {
+      setSelecionadoId(String(notificacao.projeto_id));
+      setEpisodioNotificadoId(notificacao.episodio_id || null);
+      setAbaProjeto("producao");
+      setMostrarFerramentas(false);
+      setMenuMobileAberto(false);
+      return;
     }
 
     if (!notificacao.canal_id) return;
@@ -6985,51 +6995,7 @@ export default function DubworksManager() {
   // Exemplo:
   // criar projeto, alterar link, enviar relatório, adicionar elenco etc.
 
-  const notificacoesProjeto = projetoPainel
-    ? [
-        {
-          usuario: usuarioLogado?.nome || "Sistema",
-          acao: `acessou/atualizou o projeto ${projetoPainel.Projeto}`,
-          data: new Date().toLocaleString("pt-BR"),
-          tipo: "Projeto",
-          projetoId: projetoPainel.ID,
-          lider: projetoPainel.Lider,
-          editor: projetoPainel.Editor,
-        },
-      ].filter((notificacao) => {
-        if (!usuarioLogado || !projetoPainel) return false;
-
-        if (
-          usuarioLogado.cargo === "diretoria" ||
-          usuarioLogado.cargo === "adm"
-        ) {
-          return notificacao.projetoId === projetoPainel.ID;
-        }
-
-        const vinculo = normalizar(
-          usuarioLogado.vinculo || usuarioLogado.nome || usuarioLogado.login
-        );
-
-        if (
-          usuarioLogado.cargo === "lider" ||
-          usuarioLogado.cargo === "lider_treinamento"
-        ) {
-          return (
-            notificacao.projetoId === projetoPainel.ID &&
-            normalizar(notificacao.lider) === vinculo
-          );
-        }
-
-        if (usuarioLogado.cargo === "editor") {
-          return (
-            notificacao.projetoId === projetoPainel.ID &&
-            normalizar(notificacao.editor) === vinculo
-          );
-        }
-
-        return false;
-      })
-    : [];
+  // Atividades reais são consultadas por ProjectActivityPanel no Supabase.
 
   function abrirLink(link?: string) {
     if (!link) {
@@ -13972,9 +13938,7 @@ export default function DubworksManager() {
             ["informacoes", "ⓘ Informações"],
             ["drive", "📁 Arquivos do Drive"],
             ["producao", "🎬 Produção"],
-            ["legado", "🗂 Acervo anterior"],
             ["selecao", "🎭 Seleção"],
-            ["registros", "▣ Registro"],
             ["atividades", "↔ Atividade"],
             ["historico", "◷ Histórico"],
             ["relatorios", "📊 Relatórios"],
@@ -14061,9 +14025,9 @@ export default function DubworksManager() {
             <button
               type="button"
               style={botaoSecundarioStyle}
-              onClick={() => setAbaProjeto("legado")}
+              onClick={() => setMostrarAcervoAnterior((mostrar) => !mostrar)}
             >
-              🗂 Conferir acervo de semanas anteriores
+              {mostrarAcervoAnterior ? "▴ Ocultar acervo anterior" : "🗂 Mostrar acervo anterior nesta página"}
             </button>
           </div>
           <ProjectEpisodesPanel
@@ -14071,7 +14035,8 @@ export default function DubworksManager() {
             usuarioNome={usuarioLogado?.nome || usuarioLogado?.login || "Sistema"}
             podeEditar={podeEditarProjeto(usuarioLogado, projetoPainel)}
             semanasLegadas={semanasProjeto}
-            onAbrirAcervo={() => setAbaProjeto("legado")}
+            onAbrirAcervo={() => setMostrarAcervoAnterior(true)}
+            episodioInicialId={episodioNotificadoId}
           />
         </section>
       )}
@@ -14080,7 +14045,7 @@ export default function DubworksManager() {
         projetoPainel &&
         renderAbaSelecaoVisual(projetoPainel)}
 
-      {abaProjeto === "legado" && projetoPainel && (
+      {abaProjeto === "producao" && mostrarAcervoAnterior && projetoPainel && (
         <div
           id="dw-producao-banco"
           style={{ display: "grid", gap: 18, scrollMarginTop: 22 }}
@@ -14104,9 +14069,9 @@ export default function DubworksManager() {
             <button
               type="button"
               style={botaoSecundarioStyle}
-              onClick={() => setAbaProjeto("producao")}
+              onClick={() => setMostrarAcervoAnterior(false)}
             >
-              ↑ Ir para Produção atual
+              ↑ Recolher acervo anterior
             </button>
           </div>
           <div
@@ -15148,95 +15113,16 @@ export default function DubworksManager() {
 
       {abaProjeto === "drive" && <DrivePanel />}
 
-      {abaProjeto === "registros" &&
-        (projetoPainel ? (
-          <div style={painelDarkStyle}>
-            <h2 style={tituloCardDarkStyle}>
-              ▣ Registros Semanais — {projetoPainel.Projeto}
-            </h2>
-            <p style={{ color: "#94a3b8", marginTop: 8 }}>
-              Cada registro salvo recebe automaticamente nome, data e hora.
-            </p>
-
-            {(podeEditarProjeto(usuarioLogado, projetoPainel) ||
-              usuarioLogado?.cargo === "diretoria" ||
-              usuarioLogado?.cargo === "adm") && (
-              <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
-                <textarea
-                  placeholder="Escreva o registro semanal do projeto..."
-                  value={registroSemanalTexto}
-                  onChange={(e) => setRegistroSemanalTexto(e.target.value)}
-                  style={{ ...textareaStyle, minHeight: 110 }}
-                />
-                <button
-                  onClick={salvarRegistroSemanalProjeto}
-                  style={botaoPrimarioStyle}
-                >
-                  Salvar registro semanal
-                </button>
-              </div>
-            )}
-
-            <div
-              style={{
-                marginTop: 22,
-                background: "rgba(2,6,23,0.54)",
-                border: "1px solid rgba(148,163,184,0.14)",
-                borderRadius: 14,
-                padding: 16,
-                color: "#cbd5e1",
-                whiteSpace: "pre-wrap",
-                lineHeight: 1.6,
-              }}
-            >
-              {projetoPainel.Registro_Semanal ||
-                "Nenhum registro semanal cadastrado."}
-            </div>
-          </div>
-        ) : (
-          <div style={painelDarkStyle}>
-            <h2 style={tituloCardDarkStyle}>▣ Registros Semanais</h2>
-            <p style={{ color: "#94a3b8" }}>
-              Selecione um projeto para incluir ou visualizar registros.
-            </p>
-          </div>
-        ))}
-
-      {abaProjeto === "atividades" && (
-        <div style={painelDarkStyle}>
-          <h2 style={tituloCardDarkStyle}>🔔 Atividades do Projeto</h2>
-          <p style={{ color: "#94a3b8", marginTop: 8 }}>
-            Aqui aparecem somente atividades vinculadas ao projeto selecionado e
-            ao seu acesso.
-          </p>
-          <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
-            {notificacoesProjeto.map((item, index) => (
-              <div
-                key={`${item.usuario}-${index}`}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
-                  gap: 10,
-                  background: "rgba(2,6,23,0.54)",
-                  border: "1px solid rgba(56,189,248,0.14)",
-                  borderRadius: 14,
-                  padding: 14,
-                }}
-              >
-                <div>
-                  <strong style={{ color: "#f8fafc" }}>{item.usuario}</strong>
-                  <span style={{ color: "#cbd5e1" }}> - {item.acao}</span>
-                  <div style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>
-                    {item.tipo}
-                  </div>
-                </div>
-                <div style={{ color: "#94a3b8", fontSize: 13 }}>
-                  {item.data}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {abaProjeto === "atividades" && projetoPainel && (
+        <ProjectActivityPanel
+          projetoId={Number(projetoPainel.ID)}
+          notificacoes={notificacoesChat}
+          onAbrirNotificacao={(aviso) => void abrirNotificacaoChat(aviso)}
+          onAbrirEpisodio={(id) => {
+            setEpisodioNotificadoId(id || null);
+            setAbaProjeto("producao");
+          }}
+        />
       )}
 
       {abaProjeto === "relatorios" && projetoPainel && (
