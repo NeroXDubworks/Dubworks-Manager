@@ -250,8 +250,9 @@ function prepararFormulariosProjeto_(payload) {
 
 
 /**
- * Um Form de Entregas por episódio, sem renomear ou sobrescrever os antigos.
- * Reexecutar a ação atualiza o mesmo ID, preservando respostas e planilhas.
+ * Reutiliza as perguntas e o layout do Forms do episódio anterior como modelo,
+ * mas cria um novo Form com nome e link próprios para cada episódio.
+ * Reexecutar a ação reutiliza o ID do próprio episódio, preservando respostas.
  */
 function prepararFormularioEpisodio_(payload) {
   const projectName = limparNomeProjeto_(payload.projectName || payload.projetoNome);
@@ -289,7 +290,26 @@ function prepararFormularioEpisodio_(payload) {
     }
   }
   if (!form) {
-    const arquivo = DriveApp.getFileById(templateId).makeCopy(titulo, pasta);
+    // Nunca renomear ou aproveitar o ID do Form anterior para o novo episódio.
+    // Usar sua estrutura como modelo, criando uma cópia sem respostas.
+    const fonteId = extrairId_(payload.sourceDeliveriesFormId || '');
+    let modeloId = templateId;
+    if (fonteId && fonteId !== idExistente) {
+      try {
+        FormApp.openById(fonteId);
+        modeloId = fonteId;
+      } catch (err) {
+        console.warn('Não foi possível abrir o Form anterior; será usado o modelo padrão: ' + err);
+      }
+    }
+    let arquivo;
+    try {
+      arquivo = DriveApp.getFileById(modeloId).makeCopy(titulo, pasta);
+    } catch (err) {
+      if (modeloId === templateId) throw err;
+      console.warn('Falha ao copiar o Form anterior; será usado o modelo padrão: ' + err);
+      arquivo = DriveApp.getFileById(templateId).makeCopy(titulo, pasta);
+    }
     form = FormApp.openById(arquivo.getId());
     try { form.removeDestination(); } catch (_) {}
   }
