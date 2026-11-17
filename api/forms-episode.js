@@ -58,6 +58,41 @@ export default async function handler(req, res) {
       return responder(res, 400, { ok: false, error: "Crie primeiro a pasta de Entregas deste episódio no Google Drive." });
     }
 
+    // Novo EP: herda somente a estrutura do último Forms existente da série.
+    // Não reutilizamos o mesmo ID como destino: respostas de episódios anteriores
+    // precisam permanecer na planilha e no link do seu episódio original.
+    let sourceDeliveriesFormId = "";
+    if (!episode.form_entregas_id && Number(episode.numero) > 1) {
+      const previousParams = new URLSearchParams({
+        select: "form_entregas_id",
+        projeto_id: "eq." + Number(projectId),
+        numero: "lt." + Number(episode.numero),
+        form_entregas_id: "not.is.null",
+        order: "numero.desc",
+        limit: "1",
+      });
+      const previousResponse = await fetch(
+        SUPABASE_URL + "/rest/v1/projeto_episodios?" + previousParams.toString(),
+        {
+          headers: {
+            apikey: SUPABASE_PUBLISHABLE_KEY,
+            Authorization: "Bearer " + auth.token,
+          },
+        }
+      );
+      if (!previousResponse.ok) {
+        return responder(res, 502, {
+          ok: false,
+          error: "Não foi possível localizar o modelo do episódio anterior.",
+        });
+      }
+      const previousEpisodes = await previousResponse.json().catch(() => []);
+      sourceDeliveriesFormId =
+        Array.isArray(previousEpisodes) && previousEpisodes.length
+          ? String(previousEpisodes[0].form_entregas_id || "").trim()
+          : "";
+    }
+
     const personagens = Array.isArray(body?.personagens)
       ? [...new Set(body.personagens.map((x) => String(x || "").trim()).filter(Boolean))]
       : [];
@@ -92,6 +127,7 @@ export default async function handler(req, res) {
         episodioTitulo: episode.titulo,
         entregasFolderId: episode.pasta_entregas_id,
         existingDeliveriesFormId: episode.form_entregas_id || "",
+        sourceDeliveriesFormId,
         personagensEntregas: personagens,
         semanas,
         capaUrl: String(body?.capaUrl || "").trim(),
