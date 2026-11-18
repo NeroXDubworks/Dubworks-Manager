@@ -4,6 +4,7 @@ import { converterDriveParaPreview, atualizarStatusEntregaBanco, carregarPartici
 import { registrarHistoricoEpisodio } from "../services/projectEpisodes";
 import {
   alterarStatusCorte,
+  atualizarDuracaoCorte,
   listarEntregasSemEpisodio,
   vincularEntregaAoEpisodio,
   criarCorteEpisodio,
@@ -78,6 +79,9 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
   const [entregaSelecionadaId, setEntregaSelecionadaId] = useState<number | null>(null);
   const [mostrarNovo, setMostrarNovo] = useState(false);
   const [novo, setNovo] = useState(inicial);
+  const [corteEmEdicao, setCorteEmEdicao] = useState<CorteEpisodio | null>(null);
+  const [duracaoEmEdicao, setDuracaoEmEdicao] = useState("");
+  const [aviso, setAviso] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
@@ -106,7 +110,10 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
     setSemanaSelecionada(null);
     setEntregaSelecionadaId(null);
     setMostrarNovo(false);
+    setCorteEmEdicao(null);
+    setDuracaoEmEdicao("");
     setErro("");
+    setAviso("");
     Promise.all([
       listarCortesEpisodio(projetoId, episodioId),
       listarEntregasParaCortes(projetoId, episodioId),
@@ -185,6 +192,66 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       }
     } catch (e: any) {
       setErro(e?.message || "Erro ao cadastrar semana.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+
+  function abrirEdicaoDuracao(corte: CorteEpisodio) {
+    if (!podeEditar || salvando) return;
+    setErro("");
+    setAviso("");
+    setCorteEmEdicao(corte);
+    setDuracaoEmEdicao(formatCutDuration(corte.duracao_segundos));
+  }
+
+  async function salvarEdicaoDuracao(event: React.FormEvent) {
+    event.preventDefault();
+    const corte = corteEmEdicao;
+    if (!podeEditar || salvando || !corte || corte.episodio_id !== episodioId || corte.projeto_id !== projetoId) return;
+    const novaDuracaoSegundos = parseCutDuration(duracaoEmEdicao);
+    if (novaDuracaoSegundos === null) {
+      setErro("Duração inválida. Use MM:SS (ex.: 04:48) ou HH:MM:SS.");
+      return;
+    }
+    if (novaDuracaoSegundos === corte.duracao_segundos) {
+      setErro("A cronometragem é a mesma já cadastrada para esta semana.");
+      return;
+    }
+    setSalvando(true);
+    setErro("");
+    setAviso("");
+    try {
+      await atualizarDuracaoCorte({
+        projetoId, episodioId, corteId: corte.id, usuario: usuarioNome,
+        duracaoAnteriorSegundos: corte.duracao_segundos,
+        duracaoSegundos: novaDuracaoSegundos,
+      });
+      setCorteEmEdicao(null);
+      await recarregar();
+      try {
+        await registrarHistoricoEpisodio({
+          projetoId, episodioId, tipo: "duracao_semana_corrigida",
+          descricao: cutLabel(corte.semana) + ": duração corrigida de " +
+            formatCutDuration(corte.duracao_segundos) + " para " +
+            formatCutDuration(novaDuracaoSegundos) + ".",
+          usuario: usuarioNome,
+          dados: {
+            corte_id: corte.id,
+            semana: corte.semana,
+            duracao_anterior_segundos: corte.duracao_segundos,
+            duracao_nova_segundos: novaDuracaoSegundos,
+          },
+        });
+        setAviso("Cronometragem atualizada e registrada no histórico do episódio.");
+      } catch (erroHistorico: any) {
+        setAviso("Cronometragem atualizada, mas não foi possível registrar no histórico. " +
+          "Avise a administração se precisar de auditoria dessa alteração.");
+        console.error("Falha ao registrar alteração da cronometragem no histórico:", erroHistorico);
+      }
+    } catch (e: any) {
+      setErro(e?.message || "Não foi possível atualizar a cronometragem da semana.");
     } finally {
       setSalvando(false);
     }
@@ -378,6 +445,7 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
       </div>
 
       {erro && <p role="alert" style={{ color: "#fda4af", margin: 0 }}>{erro}</p>}
+      {aviso && <p role="status" style={{ color: "#86efac", margin: 0 }}>{aviso}</p>}
       {subdivisoesExistentes.length > 0 && (
         <div style={{ padding: 11, border: "1px solid rgba(245,158,11,.35)", borderRadius: 10 }}>
           <strong style={{ color: "#fde68a" }}>Subdivisões já cadastradas ({subdivisoesExistentes.length})</strong>
@@ -431,14 +499,20 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
               {selecionado?.prazo_em && <p style={texto}>Prazo: {new Date(selecionado.prazo_em).toLocaleDateString("pt-BR")}</p>}
             </div>
             {podeEditar && selecionado && (
-              <label style={{ ...texto, display: "grid", gap: 4 }}>
-                Status do corte
-                <select style={{ ...campo, minWidth: 165 }} disabled={salvando}
-                  value={selecionado.status}
-                  onChange={e => void mudarStatus(selecionado, e.target.value as CorteStatus)}>
-                  {statusOpcoes.map(status => <option key={status} value={status}>{estados[status]}</option>)}
-                </select>
-              </label>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
+                <label style={{ ...texto, display: "grid", gap: 4 }}>
+                  Status do corte
+                  <select style={{ ...campo, minWidth: 165 }} disabled={salvando}
+                    value={selecionado.status}
+                    onChange={e => void mudarStatus(selecionado, e.target.value as CorteStatus)}>
+                    {statusOpcoes.map(status => <option key={status} value={status}>{estados[status]}</option>)}
+                  </select>
+                </label>
+                <button type="button" style={botao} disabled={salvando || carregando}
+                  onClick={() => abrirEdicaoDuracao(selecionado)}>
+                  ✎ Editar cronometragem
+                </button>
+              </div>
             )}
           </div>
           {selecionado && (selecionado.video_base_url || selecionado.trilha_url) && (
@@ -599,6 +673,35 @@ export default function EpisodeWeeksPanel({ projetoId, episodioId, podeEditar, u
           </div>
         </div>
       )}
+
+      {corteEmEdicao && podeEditar && createPortal((
+        <div role="presentation" style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,.85)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, isolation: "isolate" }}
+          onMouseDown={e => { if (e.target === e.currentTarget && !salvando) setCorteEmEdicao(null); }}>
+          <form role="dialog" aria-modal="true" aria-label="Editar cronometragem da semana"
+            onSubmit={e => void salvarEdicaoDuracao(e)}
+            style={{ ...painel, position: "relative", width: "100%", maxWidth: 450, maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 12, background: "#11162c", boxShadow: "0 30px 100px rgba(0,0,0,.85)" }}>
+            <h3 style={{ color: "#f8fafc", margin: 0 }}>✎ Editar cronometragem · {cutLabel(corteEmEdicao.semana)}</h3>
+            <p style={{ ...texto, margin: 0 }}>
+              Duração cadastrada: <strong style={{ color: "#f8fafc" }}>{formatCutDuration(corteEmEdicao.duracao_segundos)}</strong>.
+              A correção muda apenas o tempo deste corte: entregas, elenco, status e vídeos são preservados.
+            </p>
+            <label style={texto}>
+              Nova duração (MM:SS ou HH:MM:SS) *
+              <input style={campo} autoFocus required inputMode="numeric" value={duracaoEmEdicao}
+                placeholder="04:48" aria-label="Nova duração da semana"
+                onChange={e => setDuracaoEmEdicao(e.target.value)} />
+            </label>
+            {erro && <p role="alert" style={{ color: "#fda4af", margin: 0 }}>{erro}</p>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" style={botao} disabled={salvando}
+                onClick={() => { setCorteEmEdicao(null); setErro(""); }}>Cancelar</button>
+              <button type="submit" style={{ ...botao, background: "#6d28d9" }} disabled={salvando}>
+                {salvando ? "Salvando..." : "Salvar duração"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ), document.body)}
 
       {mostrarNovo && podeEditar && createPortal((
         <div role="presentation" style={{ position: "fixed", inset: 0, background: "rgba(2,6,23,.85)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 18, isolation: "isolate" }}
