@@ -90,6 +90,51 @@ export async function criarCorteEpisodio(params: {
   return data as CorteEpisodio;
 }
 
+
+/**
+ * Corrige a duração de um corte já cadastrado sem recriá-lo ou modificar
+ * seu vínculo com o episódio, entregas e avaliações.
+ * O valor anterior é conferido para evitar sobreposição de edições concorrentes.
+ */
+export async function atualizarDuracaoCorte(params: {
+  projetoId: number;
+  episodioId: number;
+  corteId: number;
+  duracaoAnteriorSegundos: number;
+  duracaoSegundos: number;
+  usuario: string;
+}) {
+  inteiroPositivo(params.projetoId, "Projeto");
+  inteiroPositivo(params.episodioId, "Episódio");
+  inteiroPositivo(params.corteId, "Corte");
+  if (!Number.isSafeInteger(params.duracaoAnteriorSegundos) ||
+      params.duracaoAnteriorSegundos < 1 || params.duracaoAnteriorSegundos > 86400) {
+    throw new Error("Duração anterior inválida. Atualize a semana.");
+  }
+  if (!Number.isSafeInteger(params.duracaoSegundos) ||
+      params.duracaoSegundos < 1 || params.duracaoSegundos > 86400) {
+    throw new Error("Informe a duração real do corte (até 24 horas).");
+  }
+  if (params.duracaoSegundos === params.duracaoAnteriorSegundos) {
+    throw new Error("A cronometragem informada é igual à atual.");
+  }
+  const { data, error } = await supabase.from("episodio_cortes")
+    .update({
+      duracao_segundos: params.duracaoSegundos,
+      atualizado_por: params.usuario,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", params.corteId)
+    .eq("projeto_id", params.projetoId)
+    .eq("episodio_id", params.episodioId)
+    .eq("duracao_segundos", params.duracaoAnteriorSegundos)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("A duração foi alterada em outra sessão ou você não tem permissão. Atualize a semana antes de tentar novamente.");
+  return data as CorteEpisodio;
+}
+
 export async function alterarStatusCorte(params: {
   projetoId: number;
   episodioId: number;
